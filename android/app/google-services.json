@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "684017191171",
+    "project_id": "restaurant1-98",
+    "storage_bucket": "restaurant1-98.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:684017191171:android:436b3e9970aae0d9574136",
+        "android_client_info": {
+          "package_name": "com.example.waiter_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBT0RsyYbyrrX_SScm1QtfM1suRJrqBY9w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
