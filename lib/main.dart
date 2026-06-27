@@ -755,7 +755,6 @@ class _MesasScreenState extends State<MesasScreen> {
         statusLabel: _statusLabel(mesa.status),
         onStatusChange: (newStatus) async {
           Navigator.pop(context);
-          // Actualizar en Firestore
           await FirebaseService.updateMesaStatus(
             mesa.docId,
             newStatus.value,
@@ -764,6 +763,21 @@ class _MesasScreenState extends State<MesasScreen> {
                 ? Timestamp.now()
                 : null,
           );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Mesa ${mesa.numero.toString().padLeft(2, '0')}: ${_statusLabel(newStatus)}',
+                ),
+                backgroundColor: _statusColor(newStatus),
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
         },
       ),
     );
@@ -960,7 +974,6 @@ class _MesasScreenState extends State<MesasScreen> {
     return StreamBuilder<List<MesaData>>(
       stream: FirebaseService.getMesasStream(),
       builder: (context, snapshot) {
-        // Estado de carga
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: Column(
@@ -977,7 +990,6 @@ class _MesasScreenState extends State<MesasScreen> {
           );
         }
 
-        // Error de conexión
         if (snapshot.hasError) {
           return Center(
             child: Column(
@@ -1004,46 +1016,128 @@ class _MesasScreenState extends State<MesasScreen> {
           );
         }
 
-        final mesas = snapshot.data ?? [];
+        final allMesas = snapshot.data ?? [];
+        final filteredMesas = allMesas
+            .where((m) => m.salon == _salones[_selectedTab])
+            .toList();
 
-        if (mesas.isEmpty) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.table_restaurant,
-                    color: AppColors.textMuted, size: 56),
-                SizedBox(height: 12),
-                Text('No hay mesas registradas',
-                    style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 15)),
-              ],
+        return Column(
+          children: [
+            _buildSummaryBar(allMesas),
+            Expanded(
+              child: allMesas.isEmpty
+                  ? const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.table_restaurant,
+                              color: AppColors.textMuted, size: 56),
+                          SizedBox(height: 12),
+                          Text('No hay mesas registradas',
+                              style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 15)),
+                        ],
+                      ),
+                    )
+                  : filteredMesas.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.filter_none,
+                                  color: AppColors.textMuted, size: 56),
+                              const SizedBox(height: 12),
+                              Text('Sin mesas en ${_salones[_selectedTab]}',
+                                  style: const TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 15)),
+                            ],
+                          ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: () async {
+                            setState(() {});
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                            child: GridView.builder(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: 200,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                childAspectRatio: 0.88,
+                              ),
+                              itemCount: filteredMesas.length,
+                              itemBuilder: (_, i) => _MesaCard(
+                                mesa: filteredMesas[i],
+                                statusColor: _statusColor(filteredMesas[i].status),
+                                statusLabel: _statusLabel(filteredMesas[i].status),
+                                statusIcon: _statusIcon(filteredMesas[i].status),
+                                onTap: () => _showMesaDetail(filteredMesas[i]),
+                              ),
+                            ),
+                          ),
+                        ),
             ),
-          );
-        }
-
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-          child: GridView.builder(
-            gridDelegate:
-                const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 0.88,
-            ),
-            itemCount: mesas.length,
-            itemBuilder: (_, i) => _MesaCard(
-              mesa: mesas[i],
-              statusColor: _statusColor(mesas[i].status),
-              statusLabel: _statusLabel(mesas[i].status),
-              statusIcon: _statusIcon(mesas[i].status),
-              onTap: () => _showMesaDetail(mesas[i]),
-            ),
-          ),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildSummaryBar(List<MesaData> mesas) {
+    final counts = {
+      MesaStatus.libre: mesas.where((m) => m.status == MesaStatus.libre).length,
+      MesaStatus.ocupada: mesas.where((m) => m.status == MesaStatus.ocupada).length,
+      MesaStatus.pago: mesas.where((m) => m.status == MesaStatus.pago).length,
+      MesaStatus.reservada: mesas.where((m) => m.status == MesaStatus.reservada).length,
+    };
+    final items = [
+      (AppColors.mint, 'Libre', counts[MesaStatus.libre]!),
+      (AppColors.orange, 'Ocupada', counts[MesaStatus.ocupada]!),
+      (AppColors.red, 'Pago', counts[MesaStatus.pago]!),
+      (AppColors.blue, 'Reservada', counts[MesaStatus.reservada]!),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Row(
+        children: items.map((e) {
+          return Expanded(
+            child: Container(
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              decoration: BoxDecoration(
+                color: e.$1.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: e.$1.withOpacity(0.15)),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    '${e.$3}',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: e.$1,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    e.$2,
+                    style: const TextStyle(
+                      fontSize: 9,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 

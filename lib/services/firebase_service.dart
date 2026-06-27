@@ -77,16 +77,16 @@ class FirebaseService {
       // Crear 10 mesas de ejemplo
       final batch = _db.batch();
       final List<Map<String, dynamic>> mesas = [
-        {'numero': 1, 'capacidad': 2, 'status': 'libre'},
-        {'numero': 2, 'capacidad': 4, 'status': 'libre'},
-        {'numero': 3, 'capacidad': 4, 'status': 'libre'},
-        {'numero': 4, 'capacidad': 6, 'status': 'libre'},
-        {'numero': 5, 'capacidad': 6, 'status': 'libre'},
-        {'numero': 6, 'capacidad': 2, 'status': 'libre'},
-        {'numero': 7, 'capacidad': 8, 'status': 'libre'},
-        {'numero': 8, 'capacidad': 4, 'status': 'libre'},
-        {'numero': 9, 'capacidad': 4, 'status': 'libre'},
-        {'numero': 10, 'capacidad': 10, 'status': 'libre'},
+        {'numero': 1, 'capacidad': 2, 'status': 'libre', 'salon': 'Salón Principal'},
+        {'numero': 2, 'capacidad': 4, 'status': 'libre', 'salon': 'Salón Principal'},
+        {'numero': 3, 'capacidad': 4, 'status': 'libre', 'salon': 'Salón Principal'},
+        {'numero': 4, 'capacidad': 6, 'status': 'libre', 'salon': 'Terraza'},
+        {'numero': 5, 'capacidad': 6, 'status': 'libre', 'salon': 'Terraza'},
+        {'numero': 6, 'capacidad': 2, 'status': 'libre', 'salon': 'Barra'},
+        {'numero': 7, 'capacidad': 8, 'status': 'libre', 'salon': 'Salón Principal'},
+        {'numero': 8, 'capacidad': 4, 'status': 'libre', 'salon': 'Salón Principal'},
+        {'numero': 9, 'capacidad': 4, 'status': 'libre', 'salon': 'Terraza'},
+        {'numero': 10, 'capacidad': 10, 'status': 'libre', 'salon': 'Salón Principal'},
       ];
       for (final mesa in mesas) {
         batch.set(_mesas.doc(), mesa);
@@ -149,6 +149,7 @@ class MesaData {
   final int numero;
   final int capacidad;
   final MesaStatus status;
+  final String salon;
   final int? comensales;
   final double? totalCobrar;
   final DateTime? ocupadaDesde;
@@ -158,6 +159,7 @@ class MesaData {
     required this.numero,
     required this.capacidad,
     required this.status,
+    this.salon = 'Salón Principal',
     this.comensales,
     this.totalCobrar,
     this.ocupadaDesde,
@@ -170,6 +172,7 @@ class MesaData {
       numero: (data['numero'] as num).toInt(),
       capacidad: (data['capacidad'] as num).toInt(),
       status: MesaStatusExt.fromString(data['status'] ?? 'libre'),
+      salon: data['salon'] ?? 'Salón Principal',
       comensales: data['comensales'] != null
           ? (data['comensales'] as num).toInt()
           : null,
