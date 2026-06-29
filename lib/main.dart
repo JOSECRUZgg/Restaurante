@@ -138,7 +138,7 @@ class ServeSyncApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ServeSync',
+      title: 'Restaurante App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
@@ -397,7 +397,7 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         const SizedBox(height: 16),
         const Text(
-          'ServeSync',
+          'Restaurante App',
           style: TextStyle(
             fontSize: 38,
             fontWeight: FontWeight.w900,
@@ -816,7 +816,8 @@ class _MesasScreenState extends State<MesasScreen>
   Map<String, dynamic>? _meseroData;
   int _ordenesHoy = 0;
   double _totalFacturadoHoy = 0;
-  List<Map<String, dynamic>> _mesasData = [];
+  final Set<String> _seccionesExpandidas = {};
+  StreamSubscription<List<HistorialEvento>>? _historialStatsSub;
 
   @override
   void initState() {
@@ -850,7 +851,12 @@ class _MesasScreenState extends State<MesasScreen>
         _lastKnownRol ??= rolInitial;
         if (nuevoRol != null && nuevoRol != _lastKnownRol) {
           _lastKnownRol = nuevoRol;
-          setState(() => _esAdmin = nuevoRol == 'admin');
+          setState(() {
+            _esAdmin = nuevoRol == 'admin';
+            if (!_esAdmin && (_navIndex == 2 || _navIndex == 3)) {
+              _navIndex = 0;
+            }
+          });
           showDialog(
             context: context,
             barrierDismissible: false,
@@ -876,43 +882,30 @@ class _MesasScreenState extends State<MesasScreen>
         }
       }
     });
-    _loadTodayStats();
-    FirebaseService.getMesasStream().listen((mesas) {
-      if (mounted) {
-        setState(() => _mesasData = mesas.map((m) {
-          final map = <String, dynamic>{
-            'docId': m.docId,
-            'numero': m.numero,
-            'status': m.status.name,
-            'totalOrden': m.totalOrden,
-            'salon': m.salon,
-          };
-          return map;
-        }).toList());
-      }
-    });
+    _subscribeToHistorialStats();
   }
 
-  Future<void> _loadTodayStats() async {
-    final eventos = await FirebaseService.getHistorialHoyByUsuario(widget.meseroNombre);
-    if (!mounted) return;
-    int ordenes = 0;
-    double total = 0;
-    for (final e in eventos) {
-      if (e.tipo == 'cambio_estado') {
-        final status = e.datos['status'] as String?;
-        if (status == 'ocupada') ordenes++;
-        if (status == 'pago') {
-          final t = e.datos['totalOrden'];
+  void _subscribeToHistorialStats() {
+    _historialStatsSub = FirebaseService
+        .getHistorialHoyStreamByUsuario(widget.meseroNombre)
+        .listen((eventos) {
+      if (!mounted) return;
+      int ordenes = 0;
+      double total = 0;
+      for (final e in eventos) {
+        if (e.tipo == 'pago_confirmado') {
+          ordenes++;
+          final t = e.datos['total'];
           if (t is num) total += t.toDouble();
         }
       }
-    }
-    setState(() {
-      _ordenesHoy = ordenes;
-      _totalFacturadoHoy = total;
+      setState(() {
+        _ordenesHoy = ordenes;
+        _totalFacturadoHoy = total;
+      });
     });
   }
+
 
   Future<void> _initSession() async {
     final prefs = await SharedPreferences.getInstance();
@@ -984,6 +977,7 @@ class _MesasScreenState extends State<MesasScreen>
     _searchController.dispose();
     _menuSearchCtrl.dispose();
     _fotoSub?.cancel();
+    _historialStatsSub?.cancel();
     super.dispose();
   }
 
@@ -1032,16 +1026,20 @@ class _MesasScreenState extends State<MesasScreen>
     overlay.insert(entry);
   }
 
-  void _showMesaDetail(MesaData mesa) {
-    showModalBottomSheet(
+  void _showMesaDetail(MesaData mesa) async {
+    final result = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _MesaDetailSheet(
-        mesa: mesa,
-        statusColor: _statusColor(mesa.status),
-        statusLabel: _statusLabel(mesa.status),
-        onStatusChange: (newStatus) async {
+      builder: (_) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.55,
+        ),
+        child: _MesaDetailSheet(
+          mesa: mesa,
+          statusColor: _statusColor(mesa.status),
+          statusLabel: _statusLabel(mesa.status),
+          onStatusChange: (newStatus) async {
           final oldStatus = mesa.status;
           final oldTotal = mesa.totalCobrar;
           final oldOcupada = mesa.ocupadaDesde;
@@ -1075,6 +1073,65 @@ class _MesasScreenState extends State<MesasScreen>
             });
           }
         },
+        ),
+      ),
+    );
+    if (result == 'ver_orden' && mounted) {
+      _showOrdenCompletaScreen(mesa);
+    }
+  }
+
+  void _showOrdenCompletaScreen(MesaData mesa) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _OrdenCompletaScreen(
+          mesa: mesa,
+          meseroNombre: widget.meseroNombre,
+          onSolicitarPago: () async {
+            final confirm = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                backgroundColor: AppColors.surface,
+                title: const Text('Solicitar Pago',
+                    style: TextStyle(color: AppColors.textPrimary)),
+                content: Text(
+                  '¿Enviar solicitud de pago para la Mesa ${mesa.numero}?',
+                  style: const TextStyle(color: AppColors.textSecondary),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancelar',
+                        style: TextStyle(color: AppColors.textMuted)),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Solicitar',
+                        style: TextStyle(color: AppColors.primary)),
+                  ),
+                ],
+              ),
+            );
+            if (confirm != true) return;
+            // Verificar que nadie más haya solicitado pago ya
+            final snap = await FirebaseService.getMesaDoc(mesa.docId);
+            if (snap?['solicitudPago'] != null) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Esta mesa ya tiene una solicitud de pago activa'),
+                    backgroundColor: AppColors.red,
+                  ),
+                );
+              }
+              return;
+            }
+            await FirebaseService.solicitarPago(
+                mesa.docId, widget.meseroNombre);
+            if (context.mounted) Navigator.pop(context);
+          },
+        ),
       ),
     );
   }
@@ -1282,10 +1339,6 @@ class _MesasScreenState extends State<MesasScreen>
     final salonesAsignados = _meseroData?['salones'] is List
         ? List<String>.from(_meseroData!['salones'])
         : List<String>.from(_salones);
-    final mesasActivas = _mesasData
-        .where((m) =>
-            m['status'] == 'ocupada' && m['salon'] == _salones[_selectedTab])
-        .length;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -1414,16 +1467,6 @@ class _MesasScreenState extends State<MesasScreen>
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 8),
-          _profileCard(
-            icon: Icons.table_restaurant_outlined,
-            title: 'Mesas Activas',
-            child: Text('$mesasActivas mesas',
-                style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primary)),
           ),
           const SizedBox(height: 8),
           _profileCard(
@@ -1929,12 +1972,14 @@ class _MesasScreenState extends State<MesasScreen>
                             style: const TextStyle(
                                 fontSize: 14, fontWeight: FontWeight.w600,
                                 color: AppColors.textPrimary)),
-                        subtitle: Row(
+                        subtitle: Wrap(
+                          spacing: 6,
+                          runSpacing: 2,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Text(m['id'] ?? '',
                                 style: const TextStyle(
                                     fontSize: 11, color: AppColors.textSecondary)),
-                            const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 5, vertical: 1),
@@ -1956,8 +2001,7 @@ class _MesasScreenState extends State<MesasScreen>
                                 ),
                               ),
                             ),
-                            if (m['turno'] != null) ...[
-                              const SizedBox(width: 6),
+                            if (m['turno'] != null)
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 5, vertical: 1),
@@ -1974,13 +2018,10 @@ class _MesasScreenState extends State<MesasScreen>
                                   ),
                                 ),
                               ),
-                            ],
-                            if (!activo) ...[
-                              const SizedBox(width: 6),
+                            if (!activo)
                               const Text('Inactivo',
                                   style: TextStyle(
                                       fontSize: 10, color: AppColors.red)),
-                            ],
                           ],
                         ),
                         trailing: Row(
@@ -2158,121 +2199,123 @@ class _MesasScreenState extends State<MesasScreen>
           child: Padding(
             padding: EdgeInsets.fromLTRB(
                 24, 20, 24, 24 + MediaQuery.of(ctx).viewInsets.bottom),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36, height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.textMuted,
-                      borderRadius: BorderRadius.circular(2),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36, height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.textMuted,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                Text('EDITAR ${mesero['id'] ?? ''}',
-                    style: const TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w700,
-                        color: AppColors.textSecondary, letterSpacing: 1.5)),
-                const SizedBox(height: 16),
-                TextField(
-                    controller: nombreCtrl,
-                    decoration: _inputDecoration(
-                        'Nombre completo', Icons.person_outline)),
-                const SizedBox(height: 12),
-                TextField(
-                    controller: pinCtrl,
-                    keyboardType: TextInputType.number,
-                    maxLength: 4,
-                    decoration: _inputDecoration(
-                        'PIN (dejar vacío para quitar)', Icons.lock_outline)),
-                const SizedBox(height: 4),
-                _buildDropdown(
-                  value: rol,
-                  items: const ['mesero', 'admin'],
-                  icon: Icons.admin_panel_settings_outlined,
-                  label: (v) => v == 'admin' ? 'Administrador' : 'Mesero',
-                  onChanged: (v) {
-                    if (v != null) setSheetState(() => rol = v);
-                  },
-                ),
-                const SizedBox(height: 10),
-                _buildDropdown(
-                  value: turno,
-                  items: const ['Matutino', 'Vespertino', 'Nocturno'],
-                  icon: Icons.schedule_outlined,
-                  label: (v) => v,
-                  onChanged: (v) {
-                    if (v != null) setSheetState(() => turno = v);
-                  },
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Activo',
-                      style: TextStyle(
-                          fontSize: 14, color: AppColors.textPrimary)),
-                  value: activo,
-                  activeColor: AppColors.green,
-                  onChanged: (v) => setSheetState(() => activo = v),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: isLoading
-                        ? null
-                        : () async {
-                            final nombre = nombreCtrl.text.trim();
-                            if (nombre.isEmpty) return;
-                            setSheetState(() => isLoading = true);
-                            final data = <String, dynamic>{
-                              'nombre': nombre,
-                              'rol': rol,
-                              'turno': turno,
-                              'activo': activo,
-                            };
-                            final pin = pinCtrl.text.trim();
-                            if (pin.isNotEmpty) {
-                              data['pin'] = pin;
-                            } else {
-                              data['pin'] = FieldValue.delete();
-                            }
-                            await FirebaseService.updateMesero(
-                                mesero['docId'], data);
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.black,
-                      disabledBackgroundColor: AppColors.primaryDim,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                    ),
-                    child: isLoading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                                color: Colors.black54, strokeWidth: 2.5))
-                        : const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.save_rounded, size: 20),
-                              SizedBox(width: 8),
-                              Text('Guardar Cambios',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 15)),
-                            ],
-                          ),
+                  const SizedBox(height: 20),
+                  Text('EDITAR ${mesero['id'] ?? ''}',
+                      style: const TextStyle(
+                          fontSize: 10, fontWeight: FontWeight.w700,
+                          color: AppColors.textSecondary, letterSpacing: 1.5)),
+                  const SizedBox(height: 16),
+                  TextField(
+                      controller: nombreCtrl,
+                      decoration: _inputDecoration(
+                          'Nombre completo', Icons.person_outline)),
+                  const SizedBox(height: 12),
+                  TextField(
+                      controller: pinCtrl,
+                      keyboardType: TextInputType.number,
+                      maxLength: 4,
+                      decoration: _inputDecoration(
+                          'PIN (dejar vacío para quitar)', Icons.lock_outline)),
+                  const SizedBox(height: 4),
+                  _buildDropdown(
+                    value: rol,
+                    items: const ['mesero', 'admin'],
+                    icon: Icons.admin_panel_settings_outlined,
+                    label: (v) => v == 'admin' ? 'Administrador' : 'Mesero',
+                    onChanged: (v) {
+                      if (v != null) setSheetState(() => rol = v);
+                    },
                   ),
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  _buildDropdown(
+                    value: turno,
+                    items: const ['Matutino', 'Vespertino', 'Nocturno'],
+                    icon: Icons.schedule_outlined,
+                    label: (v) => v,
+                    onChanged: (v) {
+                      if (v != null) setSheetState(() => turno = v);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Activo',
+                        style: TextStyle(
+                            fontSize: 14, color: AppColors.textPrimary)),
+                    value: activo,
+                    activeColor: AppColors.green,
+                    onChanged: (v) => setSheetState(() => activo = v),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: isLoading
+                          ? null
+                          : () async {
+                              final nombre = nombreCtrl.text.trim();
+                              if (nombre.isEmpty) return;
+                              setSheetState(() => isLoading = true);
+                              final data = <String, dynamic>{
+                                'nombre': nombre,
+                                'rol': rol,
+                                'turno': turno,
+                                'activo': activo,
+                              };
+                              final pin = pinCtrl.text.trim();
+                              if (pin.isNotEmpty) {
+                                data['pin'] = pin;
+                              } else {
+                                data['pin'] = FieldValue.delete();
+                              }
+                              await FirebaseService.updateMesero(
+                                  mesero['docId'], data);
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.black,
+                        disabledBackgroundColor: AppColors.primaryDim,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: isLoading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                  color: Colors.black54, strokeWidth: 2.5))
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.save_rounded, size: 20),
+                                SizedBox(width: 8),
+                                Text('Guardar Cambios',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15)),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -3548,13 +3591,12 @@ class _MesasScreenState extends State<MesasScreen>
                 const SizedBox(height: 12),
                 _buildDropdown(
                   value: statusSeleccionado,
-                  items: const ['libre', 'ocupada', 'pago', 'reservada'],
+                  items: const ['libre', 'ocupada', 'reservada'],
                   icon: Icons.circle_outlined,
                   label: (v) {
                     switch (v) {
                       case 'libre': return 'Libre';
                       case 'ocupada': return 'Ocupada';
-                      case 'pago': return 'Pago';
                       case 'reservada': return 'Reservada';
                       default: return v;
                     }
@@ -3774,8 +3816,6 @@ class _MesasScreenState extends State<MesasScreen>
                   mesas.where((m) => m.status == MesaStatus.libre).length;
               final ocupadas =
                   mesas.where((m) => m.status == MesaStatus.ocupada).length;
-              final pagos =
-                  mesas.where((m) => m.status == MesaStatus.pago).length;
               final reservadas =
                   mesas.where((m) => m.status == MesaStatus.reservada).length;
 
@@ -3790,7 +3830,6 @@ class _MesasScreenState extends State<MesasScreen>
                             'Libres', libres, total, AppColors.green),
                         _statItem(
                             'Ocupadas', ocupadas, total, AppColors.orange),
-                        _statItem('Pago', pagos, total, AppColors.red),
                         _statItem('Reservadas', reservadas,
                             total, AppColors.blue),
                       ],
@@ -3816,6 +3855,8 @@ class _MesasScreenState extends State<MesasScreen>
                     ),
                     const SizedBox(height: 12),
                     _buildMeserosActivosCard(),
+                    const SizedBox(height: 12),
+                    _buildTotalesPorMeseroCard(),
                   ],
                 ),
               );
@@ -3970,6 +4011,446 @@ class _MesasScreenState extends State<MesasScreen>
     );
   }
 
+  Widget _buildTotalesPorMeseroCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderPrimary),
+      ),
+      child: StreamBuilder<List<HistorialEvento>>(
+        stream: FirebaseService.getHistorialHoyStream(),
+        builder: (context, snapshot) {
+          final eventos = snapshot.data ?? [];
+          final Map<String, _MeseroStats> statsMap = {};
+          for (final e in eventos) {
+            if (e.tipo == 'pago_confirmado') {
+              final name = e.usuario;
+              final t = e.datos['total'];
+              final total = t is num ? t.toDouble() : 0.0;
+              statsMap.putIfAbsent(name, () => _MeseroStats());
+              statsMap[name]!.ordenes++;
+              statsMap[name]!.total += total;
+            }
+          }
+          final statsList = statsMap.entries.toList()
+            ..sort((a, b) => b.value.total.compareTo(a.value.total));
+          final maxTotal = statsList.isNotEmpty
+              ? statsList.first.value.total
+              : 1.0;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.bar_chart_rounded, color: AppColors.primary, size: 18),
+                  SizedBox(width: 8),
+                  Text('Totales por Mesero (Hoy)',
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (statsList.isEmpty)
+                const Text('Sin órdenes pagadas hoy',
+                    style: TextStyle(color: AppColors.textMuted))
+              else
+                ...statsList.map((entry) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(entry.key,
+                                  style: const TextStyle(
+                                      fontSize: 13, color: AppColors.textSecondary)),
+                              Text(
+                                  '${entry.value.ordenes} órdenes · \$${entry.value.total.toStringAsFixed(0)}',
+                                  style: const TextStyle(
+                                      fontSize: 14, fontWeight: FontWeight.w800,
+                                      color: AppColors.green)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: maxTotal > 0
+                                  ? entry.value.total / maxTotal
+                                  : 0,
+                              backgroundColor: AppColors.green.withOpacity(0.1),
+                              valueColor: const AlwaysStoppedAnimation(AppColors.green),
+                              minHeight: 6,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildAlertasScreen() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.primary.withOpacity(0.15),
+                ),
+                child: const Icon(Icons.notifications_rounded,
+                    color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Text('Alertas de Pago',
+                  style: TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: StreamBuilder<List<MesaData>>(
+              stream: FirebaseService.getMesasStream(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final solicitadas = snapshot.data!
+                    .where((m) => m.solicitudPago != null)
+                    .toList();
+                if (solicitadas.isEmpty) {
+                  return const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle_outline,
+                            size: 56, color: AppColors.green),
+                        SizedBox(height: 12),
+                        Text('Sin solicitudes de pago pendientes',
+                            style: TextStyle(
+                                fontSize: 14, color: AppColors.textMuted)),
+                      ],
+                    ),
+                  );
+                }
+                return ListView(
+                  padding: const EdgeInsets.only(bottom: 80),
+                  children: solicitadas.map((mesa) {
+                    final solicitud = mesa.solicitudPago;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.bgCard,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.borderPrimary),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 44, height: 44,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(Icons.table_restaurant_rounded,
+                                      color: AppColors.primary, size: 24),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                          'MESA ${mesa.numero.toString().padLeft(2, '0')}',
+                                          style: const TextStyle(
+                                              fontSize: 16, fontWeight: FontWeight.w800,
+                                              color: AppColors.textPrimary)),
+                                      Text(mesa.salon,
+                                          style: const TextStyle(
+                                              fontSize: 11, color: AppColors.textMuted)),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.schedule_outlined,
+                                          size: 11, color: AppColors.primary),
+                                      SizedBox(width: 4),
+                                      Text('Pendiente',
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w700,
+                                              color: AppColors.primary)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                const Icon(Icons.person_outline,
+                                    size: 13, color: AppColors.textMuted),
+                                const SizedBox(width: 4),
+                                Text(
+                                    solicitud?['solicitadoPor'] as String? ??
+                                        'Mesero',
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary)),
+                                const Spacer(),
+                                Text('\$${mesa.totalOrden.toStringAsFixed(0)}',
+                                    style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w900,
+                                        color: AppColors.green)),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _showRechazarDialog(mesa),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: AppColors.red,
+                                      side: const BorderSide(color: AppColors.red),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12)),
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                    icon: const Icon(Icons.close_rounded, size: 18),
+                                    label: const Text('Rechazar',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w700, fontSize: 13)),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  flex: 2,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () =>
+                                        _showConfirmarPagoDialog(mesa),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.green,
+                                      foregroundColor: Colors.black,
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12)),
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                    icon: const Icon(Icons.payments_rounded, size: 18),
+                                    label: const Text('Cobrar y Liberar',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w700, fontSize: 13)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showConfirmarPagoDialog(MesaData mesa) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.bgCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: AppColors.borderPrimary),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.payments_rounded, color: AppColors.green, size: 24),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text('Confirmar Pago',
+                  style: TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Mesa ${mesa.numero.toString().padLeft(2, '0')} · ${mesa.salon}',
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 4),
+            Text('${mesa.orden.length} items · Total: \$${mesa.totalOrden.toStringAsFixed(0)}',
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(height: 12),
+            ...mesa.orden.map((item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    children: [
+                      Text('${item['cantidad']}x',
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w700,
+                              color: AppColors.primary)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text('${item['nombre']}',
+                            style: const TextStyle(
+                                fontSize: 12, color: AppColors.textPrimary)),
+                      ),
+                      Text(
+                          '\$${((item['precio'] as num) * (item['cantidad'] as num)).toStringAsFixed(0)}',
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                    ],
+                  ),
+                )),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar',
+                style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await FirebaseService.confirmarPago(
+                mesa.docId,
+                usuario: widget.meseroNombre,
+                atendidoPor: mesa.atendidoPor,
+                mesaNumero: mesa.numero,
+                totalOrden: mesa.totalOrden,
+              );
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.green,
+              foregroundColor: Colors.black,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Confirmar y Liberar',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRechazarDialog(MesaData mesa) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.bgCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: AppColors.borderPrimary),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.close_rounded, color: AppColors.red, size: 24),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text('Rechazar Solicitud',
+                  style: TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Mesa ${mesa.numero.toString().padLeft(2, '0')} · ${mesa.salon}',
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            Text('Solicitada por: ${mesa.solicitudPago?['solicitadoPor'] as String? ?? 'Mesero'}',
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(height: 12),
+            const Text('La orden será devuelta al mesero para que la corrija.',
+                style: TextStyle(
+                    fontSize: 13, color: AppColors.textMuted)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar',
+                style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await FirebaseService.rechazarSolicitudPago(mesa.docId);
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.red,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Rechazar y Regresar',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -3977,11 +4458,13 @@ class _MesasScreenState extends State<MesasScreen>
       body: SafeArea(
         child: _navIndex == 4
             ? _buildPerfilScreen()
-            : _navIndex == 3
-                ? _buildReportesScreen()
-                : _navIndex == 1
-                    ? _buildMenuScreen()
-                    : _buildMesasContent(),
+            : _esAdmin && _navIndex == 2
+                ? _buildAlertasScreen()
+                : _esAdmin && _navIndex == 3
+                    ? _buildReportesScreen()
+                    : _navIndex == 1
+                        ? _buildMenuScreen()
+                        : _buildMesasContent(),
       ),
       floatingActionButton:
           _navIndex == 0 || _navIndex == 1 ? _buildFAB() : null,
@@ -4084,7 +4567,7 @@ class _MesasScreenState extends State<MesasScreen>
                       color: AppColors.primary, size: 18),
                   SizedBox(width: 6),
                   Text(
-                    'ServeSync',
+                    'Restaurante App',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
@@ -4199,7 +4682,6 @@ class _MesasScreenState extends State<MesasScreen>
     final items = [
       (AppColors.green, 'Libre'),
       (AppColors.orange, 'Ocupada'),
-      (AppColors.red, 'Pago'),
       (AppColors.blue, 'Reservada'),
     ];
     return Wrap(
@@ -4352,13 +4834,11 @@ class _MesasScreenState extends State<MesasScreen>
     final counts = {
       MesaStatus.libre: mesas.where((m) => m.status == MesaStatus.libre).length,
       MesaStatus.ocupada: mesas.where((m) => m.status == MesaStatus.ocupada).length,
-      MesaStatus.pago: mesas.where((m) => m.status == MesaStatus.pago).length,
       MesaStatus.reservada: mesas.where((m) => m.status == MesaStatus.reservada).length,
     };
     final items = [
       (AppColors.green, 'Libre', counts[MesaStatus.libre]!),
       (AppColors.orange, 'Ocupada', counts[MesaStatus.ocupada]!),
-      (AppColors.red, 'Pago', counts[MesaStatus.pago]!),
       (AppColors.blue, 'Reservada', counts[MesaStatus.reservada]!),
     ];
 
@@ -4564,49 +5044,100 @@ class _MesasScreenState extends State<MesasScreen>
                   padding: const EdgeInsets.only(bottom: 80),
                   children: order.map((seccion) {
                     final items = grouped[seccion]!;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12, bottom: 6),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 3, height: 16,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
+                    final expandida = _seccionesExpandidas.contains(seccion);
+                    IconData icono;
+                    switch (seccion) {
+                      case 'Entradas':
+                        icono = Icons.eco_outlined;
+                      case 'Platillos':
+                        icono = Icons.restaurant_outlined;
+                      case 'Bebidas':
+                        icono = Icons.local_drink_outlined;
+                      case 'Postres':
+                        icono = Icons.cake_outlined;
+                      default:
+                        icono = Icons.circle_outlined;
+                    }
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: AppColors.bgCard,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.borderPrimary),
+                      ),
+                      child: Column(
+                        children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => setState(() {
+                              if (expandida) {
+                                _seccionesExpandidas.remove(seccion);
+                              } else {
+                                _seccionesExpandidas.add(seccion);
+                              }
+                            }),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 14),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 32, height: 32,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(icono,
+                                        color: AppColors.primary, size: 18),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(seccion,
+                                      style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.textPrimary)),
+                                  const Spacer(),
+                                  Text('${items.length}',
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppColors.textMuted)),
+                                  const SizedBox(width: 6),
+                                  Icon(
+                                    expandida
+                                        ? Icons.expand_less_rounded
+                                        : Icons.expand_more_rounded,
+                                    color: AppColors.textMuted, size: 20,
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 8),
-                              Text(seccion,
-                                  style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.textPrimary)),
-                              const Spacer(),
-                              Text('${items.length}',
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppColors.textMuted)),
-                            ],
+                            ),
                           ),
-                        ),
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            mainAxisSpacing: 10,
-                            crossAxisSpacing: 10,
-                            childAspectRatio: 0.78,
-                          ),
-                          itemCount: items.length,
-                          itemBuilder: (_, i) =>
-                              _buildPlatilloCard(items[i]),
-                        ),
-                      ],
+                          if (expandida) ...[
+                            const Divider(
+                              color: AppColors.borderPrimary,
+                              height: 1,
+                              thickness: 1,
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: GridView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                gridDelegate:
+                                    const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 2,
+                                  mainAxisSpacing: 10,
+                                  crossAxisSpacing: 10,
+                                  childAspectRatio: 0.78,
+                                ),
+                                itemCount: items.length,
+                                itemBuilder: (_, i) =>
+                                    _buildPlatilloCard(items[i]),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     );
                   }).toList(),
                 );
@@ -5055,8 +5586,9 @@ class _MesasScreenState extends State<MesasScreen>
       ),
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
@@ -5165,7 +5697,7 @@ class _MesasScreenState extends State<MesasScreen>
                     ),
                     onTap: () {
                       Navigator.pop(context);
-                      _showOrdenScreen(m);
+                      _showOrdenCompletaScreen(m);
                     },
                   )),
             ],
@@ -5177,6 +5709,7 @@ class _MesasScreenState extends State<MesasScreen>
               ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -5216,7 +5749,7 @@ class _MesasScreenState extends State<MesasScreen>
   }
 
   void _showOrdenScreen(MesaData mesa) {
-    List<Map<String, dynamic>> items = [];
+    List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(mesa.orden);
     String? seccionSel;
 
     showModalBottomSheet(
@@ -5551,7 +6084,12 @@ class _MesasScreenState extends State<MesasScreen>
                   height: 48,
                   child: ElevatedButton(
                     onPressed: () async {
-                      await FirebaseService.setOrden(mesa.docId, items);
+                      await FirebaseService.setOrden(
+                        mesa.docId, items,
+                        usuario: widget.meseroNombre,
+                        mesaNumero: mesa.numero,
+                        atendidoPor: widget.meseroNombre,
+                      );
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (mounted) {
                         _showStatusNotification(MesaStatus.ocupada, mesa.numero);
@@ -5657,6 +6195,7 @@ class _MesasScreenState extends State<MesasScreen>
                     'precio': platillo.precio,
                     'cantidad': cantidad,
                     'notas': notasCtrl.text.trim(),
+                    'estado': 'pendiente',
                   });
                 });
                 Navigator.pop(d);
@@ -5678,7 +6217,8 @@ class _MesasScreenState extends State<MesasScreen>
   }
 
   Widget _buildNavBar() {
-    final items = [
+    final originalIndices = _esAdmin ? [0, 1, 2, 3, 4] : [0, 1, 4];
+    final allItems = [
       (Icons.grid_view_rounded, Icons.grid_view_outlined, 'Mesas'),
       (Icons.menu_book_rounded, Icons.menu_book_outlined, 'Menú'),
       (Icons.notifications_rounded, Icons.notifications_outlined,
@@ -5691,10 +6231,11 @@ class _MesasScreenState extends State<MesasScreen>
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: items.asMap().entries.map((e) {
-          final selected = e.key == _navIndex;
+        children: originalIndices.map((origIdx) {
+          final item = allItems[origIdx];
+          final selected = origIdx == _navIndex;
           return GestureDetector(
-            onTap: () => setState(() => _navIndex = e.key),
+            onTap: () => setState(() => _navIndex = origIdx),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(
@@ -5712,17 +6253,17 @@ class _MesasScreenState extends State<MesasScreen>
                     clipBehavior: Clip.none,
                     children: [
                       Icon(
-                        selected ? e.value.$1 : e.value.$2,
+                        selected ? item.$1 : item.$2,
                         color: selected
                             ? AppColors.primary
                             : AppColors.textMuted,
                         size: 22,
                       ),
-                      if (e.key == 2)
+                      if (_esAdmin && origIdx == 2)
                         Positioned(
                           right: -6,
                           top: -4,
-                          child: Container(
+                          child:                           Container(
                             width: 14,
                             height: 14,
                             decoration: const BoxDecoration(
@@ -5730,18 +6271,32 @@ class _MesasScreenState extends State<MesasScreen>
                               shape: BoxShape.circle,
                             ),
                             alignment: Alignment.center,
-                            child: const Text('3',
-                                style: TextStyle(
+                            child: StreamBuilder<List<MesaData>>(
+                              stream:
+                                  FirebaseService.getMesasStream(),
+                              builder: (context, snap) {
+                              final count = snap.data
+                                      ?.where((m) =>
+                                          m.solicitudPago != null)
+                                      .length ??
+                                  0;
+                                return Text(
+                                  count > 9 ? '9+' : '$count',
+                                  style: const TextStyle(
                                     fontSize: 8,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.white)),
+                                    color: Colors.white,
+                                  ),
+                                );
+                              },
+                            ),
                           ),
                         ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    e.value.$3,
+                    item.$3,
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
@@ -5911,23 +6466,11 @@ class _MesaCardState extends State<_MesaCard>
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (m.status == MesaStatus.ocupada) ...[
-                    _infoRow(Icons.timer_outlined, m.tiempoStr),
-                  ] else if (m.status == MesaStatus.pago) ...[
-                    Text(
-                      '\$${(m.totalCobrar ?? 0).toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.red,
-                        height: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
                     _infoRow(Icons.timer_outlined, m.tiempoStr),
                   ] else if (m.status == MesaStatus.libre) ...[
                     const Text(
@@ -5948,22 +6491,22 @@ class _MesaCardState extends State<_MesaCard>
                       ),
                     ),
                   ],
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.chair_outlined,
-                            size: 11, color: AppColors.textMuted),
-                        const SizedBox(width: 3),
-                        Text(
-                          '${m.capacidad} pax',
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.chair_outlined,
+                              size: 11, color: AppColors.textMuted),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${m.capacidad} pax',
                           style: const TextStyle(
                             fontSize: 10,
                             color: AppColors.textMuted,
@@ -6024,7 +6567,6 @@ class _MesaDetailSheet extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             width: double.infinity,
@@ -6120,12 +6662,13 @@ class _MesaDetailSheet extends StatelessWidget {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                   children: [
                     _infoChip(
                       Icons.chair_outlined,
@@ -6254,23 +6797,20 @@ class _MesaDetailSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Row(
-                  children: MesaStatus.values.map((s) {
+                  children: MesaStatus.values.where((s) => s != MesaStatus.pago).map((s) {
                     final colors = {
                       MesaStatus.libre: AppColors.green,
                       MesaStatus.ocupada: AppColors.orange,
-                      MesaStatus.pago: AppColors.red,
                       MesaStatus.reservada: AppColors.blue,
                     };
                     final labels = {
                       MesaStatus.libre: 'Libre',
                       MesaStatus.ocupada: 'Ocupada',
-                      MesaStatus.pago: 'Pago',
                       MesaStatus.reservada: 'Reservada',
                     };
                     final icons = {
                       MesaStatus.libre: Icons.check_circle_outline,
                       MesaStatus.ocupada: Icons.people_alt_outlined,
-                      MesaStatus.pago: Icons.payments_outlined,
                       MesaStatus.reservada:
                           Icons.event_available_outlined,
                     };
@@ -6329,29 +6869,33 @@ class _MesaDetailSheet extends StatelessWidget {
                   }).toList(),
                 ),
                 const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.black,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(14)),
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 14),
-                    ),
-                    icon: const Icon(Icons.receipt_long_rounded,
-                        size: 18),
-                    label: const Text('Ver Orden Completa',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700)),
-                  ),
-                ),
-                const SizedBox(height: 24),
               ],
+            ),
+          ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () =>
+                    Navigator.pop(context, 'ver_orden'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 14),
+                ),
+                icon: const Icon(Icons.receipt_long_rounded,
+                    size: 18),
+                label: const Text('Ver Orden Completa',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700)),
+              ),
             ),
           ),
         ],
@@ -6379,6 +6923,768 @@ class _MesaDetailSheet extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── ORDEN COMPLETA ──────────────────────────────────────────────────────────
+class _OrdenCompletaScreen extends StatefulWidget {
+  final MesaData mesa;
+  final String meseroNombre;
+  final VoidCallback? onSolicitarPago;
+
+  const _OrdenCompletaScreen({
+    required this.mesa,
+    required this.meseroNombre,
+    this.onSolicitarPago,
+  });
+
+  @override
+  State<_OrdenCompletaScreen> createState() => _OrdenCompletaScreenState();
+}
+
+class _OrdenCompletaScreenState extends State<_OrdenCompletaScreen> {
+  late List<Map<String, dynamic>> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List<Map<String, dynamic>>.from(widget.mesa.orden);
+  }
+
+  double get _total {
+    double total = 0;
+    for (final item in _items) {
+      total += ((item['precio'] as num?)?.toDouble() ?? 0) *
+          ((item['cantidad'] as num?)?.toInt() ?? 1);
+    }
+    return total;
+  }
+
+  Future<void> _deleteItem(int index) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Eliminar platillo',
+            style: TextStyle(color: AppColors.textPrimary)),
+        content: Text(
+          '¿Eliminar "${_items[index]['nombre']}" de la orden?',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar',
+                style: TextStyle(color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar',
+                style: TextStyle(color: AppColors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    _items.removeAt(index);
+    setState(() {});
+    await FirebaseService.setOrden(widget.mesa.docId,
+        List<Map<String, dynamic>>.from(_items),
+        usuario: widget.meseroNombre,
+        mesaNumero: widget.mesa.numero,
+        atendidoPor: widget.meseroNombre,
+    );
+  }
+
+  void _showAddPlatilloDialog() {
+    String? seccionSel;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocalState) => Container(
+          height: MediaQuery.of(ctx).size.height * 0.75,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.textMuted.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Text('Agregar Platillo',
+                  style: TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: StreamBuilder<List<Platillo>>(
+                  stream: FirebaseService.getPlatillosStream(),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Center(
+                          child: CircularProgressIndicator());
+                    }
+                    final platillos = snap.data!;
+                    if (seccionSel == null) {
+                      final counts = <String, int>{};
+                      for (final p in platillos) {
+                        counts[p.seccion] =
+                            (counts[p.seccion] ?? 0) + 1;
+                      }
+                      final secciones = counts.keys.toList();
+                      return GridView.builder(
+                        padding: const EdgeInsets.only(top: 4),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                          childAspectRatio: 1.1,
+                        ),
+                        itemCount: secciones.length,
+                        itemBuilder: (_, i) {
+                          final s = secciones[i];
+                          return GestureDetector(
+                            onTap: () =>
+                                setLocalState(() => seccionSel = s),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: AppColors.bgCard,
+                                borderRadius:
+                                    BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: AppColors.borderPrimary),
+                              ),
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    _seccionIcon(s),
+                                    size: 28,
+                                    color: AppColors.primary,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(s,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color:
+                                              AppColors.textPrimary)),
+                                  const SizedBox(height: 2),
+                                  Text('${counts[s]} platillos',
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color:
+                                              AppColors.textMuted)),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    }
+                    final filtrados = platillos
+                        .where((p) => p.seccion == seccionSel)
+                        .toList();
+                    return Column(
+                      children: [
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back_rounded,
+                                  color: AppColors.textPrimary),
+                              onPressed: () => setLocalState(
+                                  () => seccionSel = null),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(seccionSel!,
+                                style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textPrimary)),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: ListView.builder(
+                            itemCount: filtrados.length,
+                            itemBuilder: (_, i) {
+                              final p = filtrados[i];
+                              return Container(
+                                margin:
+                                    const EdgeInsets.only(bottom: 8),
+                                padding:
+                                    const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppColors.bgCard,
+                                  borderRadius:
+                                      BorderRadius.circular(12),
+                                  border: Border.all(
+                                      color: AppColors.borderPrimary),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(p.nombre,
+                                              style: const TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight:
+                                                      FontWeight.w600,
+                                                  color: AppColors
+                                                      .textPrimary)),
+                                          Text(
+                                              '\$${p.precio.toStringAsFixed(0)}',
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: AppColors
+                                                      .textSecondary)),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(
+                                          Icons.add_circle_outline,
+                                          color: AppColors.primary),
+                                      onPressed: () {
+                                        int cantidad = 1;
+                                        final notasCtrl =
+                                            TextEditingController();
+                                        showDialog(
+                                          context: context,
+                                          builder: (d) =>
+                                              StatefulBuilder(
+                                            builder: (d, setDState) =>
+                                                AlertDialog(
+                                              backgroundColor:
+                                                  AppColors.bgCard,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius
+                                                        .circular(20),
+                                                side: const BorderSide(
+                                                    color: AppColors
+                                                        .borderPrimary),
+                                              ),
+                                              title: Text(p.nombre,
+                                                  style: const TextStyle(
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight
+                                                              .w700,
+                                                      color: AppColors
+                                                          .textPrimary)),
+                                              content: Column(
+                                                mainAxisSize:
+                                                    MainAxisSize.min,
+                                                children: [
+                                                  Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .center,
+                                                    children: [
+                                                      IconButton(
+                                                        icon: const Icon(Icons
+                                                            .remove_circle_outline,
+                                                            color: AppColors
+                                                                .primary),
+                                                        onPressed: cantidad >
+                                                                1
+                                                            ? () =>
+                                                                setDState(
+                                                                    () =>
+                                                                        cantidad--)
+                                                            : null,
+                                                      ),
+                                                      Container(
+                                                        width: 44,
+                                                        height: 44,
+                                                        alignment:
+                                                            Alignment
+                                                                .center,
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color: AppColors
+                                                              .surface,
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(
+                                                                      10),
+                                                        ),
+                                                        child: Text(
+                                                            '$cantidad',
+                                                            style: const TextStyle(
+                                                                fontSize: 20,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w800,
+                                                                color: AppColors
+                                                                    .textPrimary)),
+                                                      ),
+                                                      IconButton(
+                                                        icon: const Icon(Icons
+                                                            .add_circle_outline,
+                                                            color: AppColors
+                                                                .primary),
+                                                        onPressed: () =>
+                                                            setDState(
+                                                                () =>
+                                                                    cantidad++),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                      height: 8),
+                                                  TextField(
+                                                    controller:
+                                                        notasCtrl,
+                                                    maxLines: 2,
+                                                    decoration:
+                                                        const InputDecoration(
+                                                      hintText:
+                                                          'Notas (ej: sin cebolla)',
+                                                      hintStyle: TextStyle(
+                                                          color: AppColors
+                                                              .textMuted),
+                                                      filled: true,
+                                                      fillColor: AppColors
+                                                          .surface,
+                                                      border:
+                                                          OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .vertical(
+                                                                    top: Radius
+                                                                        .circular(
+                                                                            12)),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                          d),
+                                                  child: const Text(
+                                                      'Cancelar',
+                                                      style: TextStyle(
+                                                          color: AppColors
+                                                              .textSecondary)),
+                                                ),
+                                                ElevatedButton(
+                                                  onPressed:
+                                                      () async {
+                                                    final item = {
+                                                      'platilloId':
+                                                          p.docId,
+                                                      'nombre':
+                                                          p.nombre,
+                                                      'precio':
+                                                          p.precio,
+                                                      'cantidad':
+                                                          cantidad,
+                                                      'notas': notasCtrl
+                                                          .text
+                                                          .trim(),
+                                                      'estado':
+                                                          'pendiente',
+                                                    };
+                                                    setState(() {
+                                                      _items.add(
+                                                          item);
+                                                    });
+                                                    Navigator.pop(
+                                                        d);
+                                                    await FirebaseService
+                                                        .addItemToOrden(
+                                                      widget.mesa
+                                                          .docId,
+                                                      item,
+                                                      usuario: widget
+                                                          .meseroNombre,
+                                                      mesaNumero: widget
+                                                          .mesa.numero,
+                                                      atendidoPor: widget
+                                                          .meseroNombre,
+                                                    );
+                                                  },
+                                                  style: ElevatedButton
+                                                      .styleFrom(
+                                                    backgroundColor:
+                                                        AppColors
+                                                            .primary,
+                                                    foregroundColor:
+                                                        Colors.black,
+                                                    elevation: 0,
+                                                    shape: RoundedRectangleBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(
+                                                                    10)),
+                                                  ),
+                                                  child: const Text(
+                                                      'Agregar',
+                                                      style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight
+                                                                  .w700)),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _seccionIcon(String seccion) {
+    switch (seccion) {
+      case 'Entradas':
+        return Icons.soup_kitchen_outlined;
+      case 'Platillos':
+        return Icons.restaurant_outlined;
+      case 'Bebidas':
+        return Icons.local_bar_outlined;
+      case 'Postres':
+        return Icons.icecream_outlined;
+      default:
+        return Icons.menu_book_outlined;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ordenNum = '#ORD-${widget.mesa.docId.substring(0, 4).toUpperCase()}';
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        backgroundColor: AppColors.bgCard,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text('Orden Completa',
+            style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary)),
+        elevation: 0,
+        scrolledUnderElevation: 2,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        children: [
+          // ── Tarjeta de identificación de mesa ──
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.bgCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.borderPrimary),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 48, height: 48,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.table_restaurant_rounded,
+                      color: AppColors.primary, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('MESA ${widget.mesa.numero.toString().padLeft(2, '0')}',
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.w800,
+                            color: AppColors.textPrimary)),
+                    Text(widget.mesa.salon,
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.textMuted)),
+                  ],
+                ),
+                const Spacer(),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(ordenNum,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700,
+                            color: AppColors.primary)),
+                    if (widget.mesa.ocupadaDesde != null)
+                      Text(widget.mesa.tiempoStr,
+                          style: const TextStyle(
+                              fontSize: 11, color: AppColors.textMuted)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Sección: ITEMS DE LA ORDEN ──
+          const Text('ITEMS DE LA ORDEN',
+              style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w700,
+                  color: AppColors.textSecondary, letterSpacing: 1.5)),
+          const SizedBox(height: 12),
+          if (_items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: Text('No hay items en esta orden',
+                    style: TextStyle(
+                        fontSize: 14, color: AppColors.textMuted)),
+              ),
+            )
+          else
+            ..._items.asMap().entries.map((entry) {
+              final i = entry.key;
+              final item = entry.value;
+              final estado = item['estado'] as String? ?? 'pendiente';
+              final esUltimo = i == _items.length - 1;
+
+              Color estadoColor;
+              IconData estadoIcon;
+              String estadoLabel;
+              switch (estado) {
+                case 'en preparacion':
+                  estadoColor = AppColors.primary;
+                  estadoIcon = Icons.restaurant_outlined;
+                  estadoLabel = 'En preparación';
+                case 'listo':
+                  estadoColor = AppColors.green;
+                  estadoIcon = Icons.check_circle_outlined;
+                  estadoLabel = 'Listo';
+                default:
+                  estadoColor = AppColors.textMuted;
+                  estadoIcon = Icons.schedule_outlined;
+                  estadoLabel = 'Pendiente';
+              }
+
+              return Padding(
+                padding: EdgeInsets.only(bottom: esUltimo ? 0 : 10),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.bgCard,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.borderPrimary),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Badge cantidad
+                      Container(
+                        width: 32, height: 32,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text('${item['cantidad']}',
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w800,
+                                color: AppColors.primary)),
+                      ),
+                      const SizedBox(width: 12),
+                      // Info: nombre + notas
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${item['nombre']}',
+                                style: const TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary)),
+                            if (item['notas'] != null &&
+                                (item['notas'] as String).isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text('${item['notas']}',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textMuted)),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Precio
+                      Text(
+                          '\$${((item['precio'] as num) * (item['cantidad'] as num)).toStringAsFixed(0)}',
+                          style: const TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(width: 8),
+                      // Estado chip
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: estadoColor.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(estadoIcon, size: 10, color: estadoColor),
+                            const SizedBox(width: 3),
+                            Text(estadoLabel,
+                                style: TextStyle(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w600,
+                                    color: estadoColor)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Botón eliminar
+                      GestureDetector(
+                        onTap: () => _deleteItem(i),
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: AppColors.red.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Icon(Icons.delete_outline,
+                              size: 16, color: AppColors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+
+          // ── Botón: Agregar Platillo ──
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: _showAddPlatilloDialog,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.primary),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.add_circle_outline, size: 20),
+              label: const Text('Agregar Platillo',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 14)),
+            ),
+          ),
+
+          // ── Total ──
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.bgCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.borderPrimary),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Total de la orden',
+                    style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary)),
+                Text('\$${_total.toStringAsFixed(0)}',
+                    style: const TextStyle(
+                        fontSize: 24, fontWeight: FontWeight.w900,
+                        color: AppColors.green)),
+              ],
+            ),
+          ),
+
+          // ── Botón: Pagar en Caja / Solicitud enviada ──
+          const SizedBox(height: 20),
+          if (widget.mesa.solicitudPago != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.textMuted.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.hourglass_top_rounded,
+                      size: 20, color: AppColors.textSecondary),
+                  SizedBox(width: 10),
+                  Text('Solicitud enviada — esperando aprobación',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textSecondary)),
+                ],
+              ),
+            )
+          else if (_items.isNotEmpty)
+            SizedBox(
+              width: double.infinity,
+              height: 54,
+              child: ElevatedButton.icon(
+                onPressed: widget.onSolicitarPago,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                icon: const Icon(Icons.point_of_sale_rounded, size: 22),
+                label: const Text('Pagar en Caja',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 16)),
+              ),
+            ),
         ],
       ),
     );
@@ -6645,4 +7951,9 @@ class _IconBtn extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MeseroStats {
+  int ordenes = 0;
+  double total = 0;
 }

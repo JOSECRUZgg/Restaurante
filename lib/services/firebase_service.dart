@@ -120,6 +120,63 @@ class FirebaseService {
     );
   }
 
+  // ─── SOLICITUDES DE PAGO ─────────────────────────────────────────────────
+
+  /// El mesero solicita pasar a caja (guarda la solicitud en la mesa)
+  static Future<void> solicitarPago(
+      String docId, String meseroNombre) async {
+    await _mesas.doc(docId).update({
+      'solicitudPago': {
+        'solicitadoPor': meseroNombre,
+        'timestamp': FieldValue.serverTimestamp(),
+      },
+    });
+  }
+
+  /// Obtiene un documento de mesa por su ID
+  static Future<Map<String, dynamic>?> getMesaDoc(String docId) async {
+    final snap = await _mesas.doc(docId).get();
+    if (!snap.exists) return null;
+    return snap.data();
+  }
+
+  /// El admin confirma el pago y libera la mesa
+  static Future<void> confirmarPago(
+    String docId, {
+    required String usuario,
+    required int mesaNumero,
+    required double totalOrden,
+    String? atendidoPor,
+  }) async {
+    await _mesas.doc(docId).update({
+      'solicitudPago': FieldValue.delete(),
+      'status': 'libre',
+      'totalCobrar': FieldValue.delete(),
+      'ocupadaDesde': FieldValue.delete(),
+      'atendidoPor': FieldValue.delete(),
+      'orden': FieldValue.delete(),
+    });
+    final datos = <String, dynamic>{
+      'mesaNumero': mesaNumero,
+      'total': totalOrden,
+      'tipo': 'pago_confirmado',
+    };
+    if (atendidoPor != null) datos['atendidoPor'] = atendidoPor;
+    await logEvent(
+      tipo: 'pago_confirmado',
+      descripcion: 'Mesa $mesaNumero pagada y liberada (\$${totalOrden.toStringAsFixed(0)})',
+      usuario: atendidoPor ?? usuario,
+      datos: datos,
+    );
+  }
+
+  /// El admin rechaza la solicitud de pago y la regresa al mesero
+  static Future<void> rechazarSolicitudPago(String docId) async {
+    await _mesas.doc(docId).update({
+      'solicitudPago': FieldValue.delete(),
+    });
+  }
+
   // ─── CRUD DE MESAS ──────────────────────────────────────────────────────────
 
   /// Crea una nueva mesa
@@ -299,7 +356,23 @@ class FirebaseService {
 
   /// Agrega un item a la orden de una mesa
   static Future<void> addItemToOrden(
-      String mesaDocId, Map<String, dynamic> item) async {
+    String mesaDocId,
+    Map<String, dynamic> item, {
+    String usuario = 'admin',
+    int mesaNumero = 0,
+    String? atendidoPor,
+  }) async {
+    final doc = await _mesas.doc(mesaDocId).get();
+    if (doc.data()?['status'] == 'libre') {
+      await updateMesaStatus(
+        mesaDocId, 'ocupada',
+        ocupadaDesde: Timestamp.now(),
+        usuario: usuario,
+        mesaNumero: mesaNumero,
+        atendidoPor: atendidoPor,
+        oldStatus: 'libre',
+      );
+    }
     await _mesas.doc(mesaDocId).update({
       'orden': FieldValue.arrayUnion([item]),
     });
@@ -322,8 +395,34 @@ class FirebaseService {
 
   /// Reemplaza toda la orden de una mesa
   static Future<void> setOrden(
-      String mesaDocId, List<Map<String, dynamic>> items) async {
+    String mesaDocId,
+    List<Map<String, dynamic>> items, {
+    String usuario = 'admin',
+    int mesaNumero = 0,
+    String? atendidoPor,
+  }) async {
+    final doc = await _mesas.doc(mesaDocId).get();
+    if (doc.data()?['status'] == 'libre') {
+      await updateMesaStatus(
+        mesaDocId, 'ocupada',
+        ocupadaDesde: Timestamp.now(),
+        usuario: usuario,
+        mesaNumero: mesaNumero,
+        atendidoPor: atendidoPor,
+        oldStatus: 'libre',
+      );
+    }
     await _mesas.doc(mesaDocId).update({'orden': items});
+  }
+
+  /// Elimina un item de la orden por su índice
+  static Future<void> removeOrdenItemAt(
+      String mesaDocId, int index) async {
+    final doc = await _mesas.doc(mesaDocId).get();
+    final orden = List<Map<String, dynamic>>.from(doc.data()?['orden'] ?? []);
+    if (index < 0 || index >= orden.length) return;
+    orden.removeAt(index);
+    await _mesas.doc(mesaDocId).update({'orden': orden});
   }
 
   // ─── CONFIGURACIÓN ──────────────────────────────────────────────────────────
@@ -380,6 +479,35 @@ class FirebaseService {
     return snap.docs
         .map((d) => HistorialEvento.fromFirestore(d.id, d.data()))
         .toList();
+  }
+
+  /// Stream del historial de HOY por usuario (stats del mesero en tiempo real)
+  static Stream<List<HistorialEvento>> getHistorialHoyStreamByUsuario(String usuario) {
+    final inicio = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final fin = inicio.add(const Duration(days: 1));
+    return _historial
+        .where('usuario', isEqualTo: usuario)
+        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(inicio))
+        .where('timestamp', isLessThan: Timestamp.fromDate(fin))
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => HistorialEvento.fromFirestore(d.id, d.data()))
+            .toList());
+  }
+
+  /// Stream del historial de HOY (todos los usuarios, para reportes admin)
+  static Stream<List<HistorialEvento>> getHistorialHoyStream() {
+    final inicio = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final fin = inicio.add(const Duration(days: 1));
+    return _historial
+        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(inicio))
+        .where('timestamp', isLessThan: Timestamp.fromDate(fin))
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => HistorialEvento.fromFirestore(d.id, d.data()))
+            .toList());
   }
 
   /// Actualiza la sección de todos los platillos que tenían una sección anterior
@@ -516,6 +644,8 @@ class MesaData {
   final double? totalCobrar;
   final DateTime? ocupadaDesde;
   final List<Map<String, dynamic>> orden;
+  final Map<String, dynamic>? solicitudPago;
+  final String? atendidoPor;
 
   MesaData({
     required this.docId,
@@ -526,6 +656,8 @@ class MesaData {
     this.totalCobrar,
     this.ocupadaDesde,
     this.orden = const [],
+    this.solicitudPago,
+    this.atendidoPor,
   });
 
   factory MesaData.fromFirestore(String docId, Map<String, dynamic> data) {
@@ -543,6 +675,10 @@ class MesaData {
       orden: data['orden'] != null
           ? List<Map<String, dynamic>>.from(data['orden'])
           : [],
+      solicitudPago: data['solicitudPago'] != null
+          ? Map<String, dynamic>.from(data['solicitudPago'])
+          : null,
+      atendidoPor: data['atendidoPor'] as String?,
     );
   }
 
