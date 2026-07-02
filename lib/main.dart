@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 import 'services/firebase_service.dart';
+import 'tablet_dashboard.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -171,6 +172,7 @@ class _LoginScreenState extends State<LoginScreen>
   final _idController = TextEditingController();
   bool _isLoading = false;
   bool _rememberMe = false;
+  bool _modoCaja = false;
   String? _errorMessage;
   bool _usePinMode = false;
   String _pinValue = '';
@@ -229,14 +231,21 @@ class _LoginScreenState extends State<LoginScreen>
     }
     await FirebaseService.seedDataIfEmpty();
     final esAdmin = mesero['rol'] == 'admin';
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => MesasScreen(
-          meseroNombre: mesero['nombre'] ?? 'Mesero',
-          meseroDocId: mesero['docId'] ?? '',
-          esAdmin: esAdmin,
-        ),
+        builder: (_) => (isTablet)
+            ? TabletDashboard(
+                meseroNombre: mesero['nombre'] ?? 'Mesero',
+                meseroDocId: mesero['docId'] ?? '',
+                esAdmin: esAdmin,
+              )
+            : MesasScreen(
+                meseroNombre: mesero['nombre'] ?? 'Mesero',
+                meseroDocId: mesero['docId'] ?? '',
+                esAdmin: esAdmin,
+              ),
       ),
     );
   }
@@ -278,13 +287,22 @@ class _LoginScreenState extends State<LoginScreen>
       await FirebaseService.seedDataIfEmpty();
 
       final esAdmin = mesero['rol'] == 'admin';
+      final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+      final targetScreen = (isTablet || _modoCaja)
+          ? TabletDashboard(
+              meseroNombre: mesero['nombre'] ?? 'Mesero',
+              meseroDocId: mesero['docId'] ?? '',
+              esAdmin: esAdmin,
+            )
+          : MesasScreen(
+              meseroNombre: mesero['nombre'] ?? 'Mesero',
+              meseroDocId: mesero['docId'] ?? '',
+              esAdmin: esAdmin,
+            );
+
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
-          pageBuilder: (_, animation, __) => MesasScreen(
-            meseroNombre: mesero['nombre'] ?? 'Mesero',
-            meseroDocId: mesero['docId'] ?? '',
-            esAdmin: esAdmin,
-          ),
+          pageBuilder: (_, animation, __) => targetScreen,
           transitionsBuilder: (_, animation, __, child) {
             return FadeTransition(
               opacity: animation,
@@ -477,6 +495,8 @@ class _LoginScreenState extends State<LoginScreen>
               const SizedBox(height: 12),
               _buildRememberMe(),
             ],
+            const SizedBox(height: 12),
+            _buildModoCajaToggle(),
             if (_errorMessage != null) ...[
               const SizedBox(height: 12),
               _buildError(),
@@ -486,6 +506,31 @@ class _LoginScreenState extends State<LoginScreen>
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildModoCajaToggle() {
+    return Row(
+      children: [
+        SizedBox(
+          width: 20,
+          height: 20,
+          child: Checkbox(
+            value: _modoCaja,
+            onChanged: (v) =>
+                setState(() => _modoCaja = v ?? false),
+            activeColor: AppColors.primary,
+            side: const BorderSide(
+                color: AppColors.textMuted, width: 1.5),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(4)),
+          ),
+        ),
+        const SizedBox(width: 8),
+        const Text('Modo Caja / Tableta',
+            style: TextStyle(
+                fontSize: 13, color: AppColors.textSecondary)),
+      ],
     );
   }
 
