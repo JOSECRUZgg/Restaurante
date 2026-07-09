@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'services/firebase_service.dart';
 import 'main.dart'; // To reuse AppColors and other styles if needed
 
@@ -184,6 +182,8 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
             _alertasPendientes > 0 ? AppColors.red : AppColors.textMuted,
             pulse: _alertasPendientes > 0,
           ),
+          const SizedBox(width: 16),
+          _buildCerrarCajaBtn(),
           const SizedBox(width: 24),
           // User profile / exit
           Row(
@@ -259,6 +259,142 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
       );
     }
     return card;
+  }
+
+  // ─── CIERRE DE CAJA ──────────────────────────────────────────────────────────
+  Widget _buildCerrarCajaBtn() {
+    return GestureDetector(
+      onTap: _showCierreCajaDialog,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.primary.withOpacity(0.4)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.lock_outline_rounded, color: AppColors.primary, size: 16),
+            const SizedBox(width: 6),
+            Text(
+              'Cerrar Caja',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCierreCajaDialog() {
+    final ticketPromedio = _cuentasCobradasHoy > 0
+        ? _totalCajaHoy / _cuentasCobradasHoy
+        : 0.0;
+    final now = DateTime.now();
+    final fechaStr = "${now.day}/${now.month}/${now.year}";
+    final horaStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.bgCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: AppColors.borderPrimary),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.lock_rounded, color: AppColors.primary, size: 24),
+            const SizedBox(width: 12),
+            const Text('Cierre de Caja', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Container(
+          width: 420,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.borderPrimary),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _cierreRow('Cajero:', widget.meseroNombre),
+              const SizedBox(height: 6),
+              _cierreRow('Fecha:', fechaStr),
+              const SizedBox(height: 6),
+              _cierreRow('Hora:', horaStr),
+              const Divider(color: AppColors.borderPrimary, height: 24),
+              _cierreRow('Total en Caja:', '\$${_totalCajaHoy.toStringAsFixed(2)}', isTotal: true),
+              const SizedBox(height: 6),
+              _cierreRow('Cuentas Cobradas:', '$_cuentasCobradasHoy'),
+              const SizedBox(height: 6),
+              _cierreRow('Ticket Promedio:', '\$${ticketPromedio.toStringAsFixed(2)}'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await FirebaseService.cerrarCaja(
+                widget.meseroNombre,
+                totalGeneral: _totalCajaHoy,
+                numTransacciones: _cuentasCobradasHoy,
+              );
+              setState(() {
+                _totalCajaHoy = 0;
+                _cuentasCobradasHoy = 0;
+              });
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Cierre de caja realizado — Total: \$${_totalCajaHoy.toStringAsFixed(2)}, Cuentas: $_cuentasCobradasHoy'),
+                    backgroundColor: AppColors.green,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.check_circle_rounded, size: 18),
+            label: const Text('Cerrar Caja', style: TextStyle(fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cierreRow(String label, String value, {bool isTotal = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: TextStyle(
+          fontSize: isTotal ? 14 : 13,
+          color: AppColors.textSecondary,
+          fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
+        )),
+        Text(value, style: TextStyle(
+          fontSize: isTotal ? 16 : 13,
+          color: isTotal ? AppColors.green : AppColors.textPrimary,
+          fontWeight: FontWeight.bold,
+        )),
+      ],
+    );
   }
 
   // ─── LEFT PANE (TABLES GRID) ────────────────────────────────────────────────
@@ -538,18 +674,22 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Selected Table Header
+          // Selected Table Header (siempre visible)
           _buildCheckoutHeader(mesa),
-          // Scrollable Items list
+          // Scrollable content (items + billing, todo junto)
           Expanded(
-            child: mesa.orden.isEmpty 
+            child: mesa.orden.isEmpty
                 ? _buildEmptyOrderState()
-                : _buildOrderItemsList(mesa),
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      children: [
+                        _buildOrderItemsList(mesa),
+                        _buildBillingControls(subtotal, propina, total),
+                      ],
+                    ),
+                  ),
           ),
-          // Tip & Payment details
-          if (mesa.orden.isNotEmpty) ...[
-            _buildBillingControls(subtotal, propina, total),
-          ]
         ],
       ),
     );
@@ -634,6 +774,8 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
 
   Widget _buildOrderItemsList(MesaData mesa) {
     return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.all(20),
       itemCount: mesa.orden.length,
       itemBuilder: (context, i) {
@@ -806,7 +948,26 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SizedBox(
+                  height: 54,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showSplitBillDialog(),
+                    icon: const Icon(Icons.call_split_rounded, size: 20),
+                    label: const Text(
+                      'Dividir',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.blue,
+                      side: const BorderSide(color: AppColors.blue, width: 1.5),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 flex: 2,
                 child: SizedBox(
@@ -815,7 +976,7 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
                     onPressed: () => _processPayment(total),
                     icon: const Icon(Icons.check_circle_rounded, size: 20),
                     label: const Text(
-                      'Cobrar & Cerrar Mesa',
+                      'Cobrar & Cerrar',
                       style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -1045,6 +1206,378 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
     }
   }
 
+  // ─── DIVIDIR CUENTA ─────────────────────────────────────────────────────────
+  void _showSplitBillDialog() {
+    final mesa = _selectedMesa!;
+    if (mesa.orden.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('La mesa no tiene platillos para dividir'), backgroundColor: AppColors.orange, behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    // Estado mutable del diálogo
+    final personas = <_SplitPerson>[];
+    personas.add(_SplitPerson('Persona 1'));
+    // Bitmask de items asignados
+    final asignados = List.filled(mesa.orden.length, -1);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // Items disponibles (no asignados a nadie)
+          final itemsDisponibles = <int>[];
+          for (int i = 0; i < mesa.orden.length; i++) {
+            if (asignados[i] == -1) itemsDisponibles.add(i);
+          }
+          final totalOrdenCheck = mesa.totalOrden;
+          double totalAsignado = 0;
+          for (final p in personas) {
+            for (final idx in p.itemIndices) {
+              final item = mesa.orden[idx];
+              final cant = item['cantidad'] ?? 1;
+              final precio = (item['precio'] as num?)?.toDouble() ?? 0;
+              totalAsignado += precio * cant;
+            }
+          }
+          final resto = totalOrdenCheck - totalAsignado;
+          final puedeCobrar = itemsDisponibles.isEmpty && (resto).abs() < 0.01;
+
+          return AlertDialog(
+            backgroundColor: AppColors.bgCard,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: const BorderSide(color: AppColors.borderPrimary),
+            ),
+            title: Row(
+              children: [
+                const Icon(Icons.call_split_rounded, color: AppColors.blue, size: 24),
+                const SizedBox(width: 12),
+                Text('Dividir Cuenta — Mesa ${mesa.numero}', style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: SizedBox(
+                width: 500,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Lista de personas
+                    ...personas.asMap().entries.map((entry) {
+                      final i = entry.key;
+                      final p = entry.value;
+                      double pTotal = 0;
+                      for (final idx in p.itemIndices) {
+                        final item = mesa.orden[idx];
+                        final cant = item['cantidad'] ?? 1;
+                        final precio = (item['precio'] as num?)?.toDouble() ?? 0;
+                        pTotal += precio * cant;
+                      }
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.borderPrimary),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.person_outline, color: AppColors.blue, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    controller: TextEditingController(text: p.nombre)..selection = TextSelection.collapsed(offset: p.nombre.length),
+                                    onChanged: (v) => p.nombre = v,
+                                    style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                                    decoration: const InputDecoration(
+                                      isDense: true,
+                                      border: InputBorder.none,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                  ),
+                                ),
+                                if (personas.length > 1)
+                                  IconButton(
+                                    icon: const Icon(Icons.remove_circle_outline, color: AppColors.red, size: 18),
+                                    onPressed: () {
+                                      for (final idx in p.itemIndices) {
+                                        asignados[idx] = -1;
+                                      }
+                                      personas.removeAt(i);
+                                      setDialogState(() {});
+                                    },
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            if (p.itemIndices.isEmpty)
+                              const Text('Sin items asignados', style: TextStyle(color: AppColors.textMuted, fontSize: 12))
+                            else
+                              ...p.itemIndices.map((idx) {
+                                final item = mesa.orden[idx];
+                                return Text(
+                                  ' • ${item['nombre']} x${item['cantidad'] ?? 1} — \$${((item['precio'] as num?)?.toDouble() ?? 0) * ((item['cantidad'] as num?)?.toInt() ?? 1)}',
+                                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                                );
+                              }),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Text('Subtotal: \$${pTotal.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
+                                const Spacer(),
+                                GestureDetector(
+                                  onTap: () => _showItemSelector(mesa, p, asignados, personas.indexOf(p), setDialogState),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.blue.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: AppColors.blue.withOpacity(0.3)),
+                                    ),
+                                    child: const Text('Seleccionar items', style: TextStyle(color: AppColors.blue, fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    // Botón agregar persona
+                    if (itemsDisponibles.isNotEmpty)
+                      GestureDetector(
+                        onTap: () {
+                          personas.add(_SplitPerson('Persona ${personas.length + 1}'));
+                          setDialogState(() {});
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.blue.withOpacity(0.3), style: BorderStyle.solid),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_circle_outline, color: AppColors.blue, size: 18),
+                              SizedBox(width: 8),
+                              Text('Agregar Persona', style: TextStyle(color: AppColors.blue, fontWeight: FontWeight.bold, fontSize: 13)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    const Divider(color: AppColors.borderPrimary, height: 24),
+                    // Resumen
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Total orden:', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                        Text('\$${totalOrdenCheck.toStringAsFixed(2)}', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Asignado:', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                        Text('\$${totalAsignado.toStringAsFixed(2)}', style: TextStyle(color: AppColors.green, fontWeight: FontWeight.bold, fontSize: 14)),
+                      ],
+                    ),
+                    if (!puedeCobrar) ...[
+                      const SizedBox(height: 8),
+                      Text('Faltan \$${resto.toStringAsFixed(2)} por asignar', style: const TextStyle(color: AppColors.red, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
+              ),
+              ElevatedButton.icon(
+                onPressed: puedeCobrar
+                    ? () {
+                        Navigator.pop(ctx);
+                        _processSplitPayments(mesa, personas);
+                      }
+                    : null,
+                icon: const Icon(Icons.check_circle_rounded, size: 18),
+                label: const Text('Cobrar Todo', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: puedeCobrar ? AppColors.green : AppColors.textMuted,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppColors.textMuted,
+                  disabledForegroundColor: AppColors.textSecondary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showItemSelector(MesaData mesa, _SplitPerson person, List<int> asignados, int personIdx, void Function(void Function()) setDialogState) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setLocalState) {
+          return AlertDialog(
+            backgroundColor: AppColors.bgCard,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: const BorderSide(color: AppColors.borderPrimary),
+            ),
+            title: Text('Items para ${person.nombre}', style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: SizedBox(
+                width: 400,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: mesa.orden.asMap().entries.map((entry) {
+                    final i = entry.key;
+                    final item = entry.value;
+                    final cant = item['cantidad'] ?? 1;
+                    final precio = (item['precio'] as num?)?.toDouble() ?? 0;
+                    final itemTotal = precio * cant;
+                    final esDePersona = asignados[i] == personIdx;
+                    final disponible = asignados[i] == -1;
+                    final seleccionable = esDePersona || disponible;
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: esDePersona ? AppColors.blue.withOpacity(0.08) : AppColors.surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: esDePersona ? AppColors.blue.withOpacity(0.4) : AppColors.borderPrimary,
+                        ),
+                      ),
+                      child: InkWell(
+                        onTap: seleccionable
+                            ? () {
+                                if (esDePersona) {
+                                  asignados[i] = -1;
+                                  person.itemIndices.remove(i);
+                                } else {
+                                  asignados[i] = personIdx;
+                                  person.itemIndices.add(i);
+                                }
+                                setLocalState(() {});
+                                setDialogState(() {});
+                              }
+                            : null,
+                        borderRadius: BorderRadius.circular(10),
+                        child: Row(
+                          children: [
+                            Icon(
+                              esDePersona ? Icons.check_box_rounded : (disponible ? Icons.check_box_outline_blank_rounded : Icons.indeterminate_check_box_outlined),
+                              color: esDePersona ? AppColors.blue : (disponible ? AppColors.textMuted : AppColors.red.withOpacity(0.4)),
+                              size: 22,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(item['nombre'] ?? '', style: TextStyle(
+                                    color: seleccionable ? AppColors.textPrimary : AppColors.textMuted,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  )),
+                                  Text('$cant x \$${precio.toStringAsFixed(0)}', style: TextStyle(
+                                    color: seleccionable ? AppColors.textSecondary : AppColors.textMuted,
+                                    fontSize: 11,
+                                  )),
+                                ],
+                              ),
+                            ),
+                            Text('\$${itemTotal.toStringAsFixed(0)}', style: TextStyle(
+                              color: esDePersona ? AppColors.blue : (disponible ? AppColors.textPrimary : AppColors.textMuted),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            )),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Listo', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _processSplitPayments(MesaData mesa, List<_SplitPerson> personas) async {
+    final splitGroupId = DateTime.now().millisecondsSinceEpoch.toString();
+    double totalGeneral = 0;
+
+    for (final p in personas) {
+      double pTotal = 0;
+      for (final idx in p.itemIndices) {
+        final item = mesa.orden[idx];
+        final cant = item['cantidad'] ?? 1;
+        final precio = (item['precio'] as num?)?.toDouble() ?? 0;
+        pTotal += precio * cant;
+      }
+      totalGeneral += pTotal;
+
+      await FirebaseService.confirmarPago(
+        mesa.docId,
+        usuario: widget.meseroNombre,
+        mesaNumero: mesa.numero,
+        totalOrden: pTotal,
+        atendidoPor: mesa.solicitudPago?['solicitadoPor'] ?? mesa.atendidoPor,
+        splitGroupId: splitGroupId,
+        subtotalSplit: pTotal,
+      );
+    }
+
+    // Limpiar la mesa después de todos los splits
+    await FirebaseService.clearMesa(mesa.docId);
+
+    setState(() {
+      _selectedMesa = null;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cuenta dividida en ${personas.length} pagos — Total \$${totalGeneral.toStringAsFixed(2)}'),
+          backgroundColor: AppColors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _simulatePrint(bool isFinalPayment) async {
     final mesa = _selectedMesa!;
     final subtotal = mesa.totalOrden;
@@ -1166,7 +1699,6 @@ class _PrinterSimulatorDialogState extends State<_PrinterSimulatorDialog> with S
           width: 420,
           padding: const EdgeInsets.all(24),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
               // POS Printer top box mockup
               Container(
@@ -1208,7 +1740,8 @@ class _PrinterSimulatorDialogState extends State<_PrinterSimulatorDialog> with S
                 color: Colors.black,
               ),
               // Receipt Paper wrapping container
-              AnimatedBuilder(
+              Expanded(
+                child: AnimatedBuilder(
                 animation: _slideAnimation,
                 builder: (context, child) {
                   return ClipRect(
@@ -1219,17 +1752,19 @@ class _PrinterSimulatorDialogState extends State<_PrinterSimulatorDialog> with S
                     ),
                   );
                 },
-                child: Container(
-                  width: 380,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF9F9FB),
-                    boxShadow: const [
-                      BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 4))
-                    ],
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  child: Column(
-                    children: [
+                child: SingleChildScrollView(
+                  child: Container(
+                    width: 380,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9F9FB),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 4))
+                      ],
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                       // Zigzag jagged header pattern
                       CustomPaint(
                         size: const Size(380, 10),
@@ -1358,7 +1893,9 @@ class _PrinterSimulatorDialogState extends State<_PrinterSimulatorDialog> with S
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
+            ),
+            ),
+            const SizedBox(height: 24),
               // Close / OK button shown when print completes
               if (_printingCompleted)
                 ElevatedButton(
@@ -1393,6 +1930,13 @@ class _PrinterSimulatorDialogState extends State<_PrinterSimulatorDialog> with S
       ),
     );
   }
+}
+
+/// Modelo auxiliar para la división de cuentas
+class _SplitPerson {
+  String nombre;
+  List<int> itemIndices;
+  _SplitPerson(this.nombre, {List<int>? indices}) : itemIndices = indices ?? [];
 }
 
 // Painter for thermal paper jagged tear-off edge

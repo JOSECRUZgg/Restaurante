@@ -46,6 +46,8 @@ class FirebaseService {
       _db.collection('config').doc('general');
   static CollectionReference<Map<String, dynamic>> get _platillos =>
       _db.collection('platillos');
+  static CollectionReference<Map<String, dynamic>> get _cortes =>
+      _db.collection('cortes');
 
   // ─── AUTENTICACIÓN ─────────────────────────────────────────────────────────
 
@@ -140,14 +142,50 @@ class FirebaseService {
     return snap.data();
   }
 
-  /// El admin confirma el pago y libera la mesa
+  /// El admin confirma el pago y libera la mesa.
+  /// Si [splitGroupId] se proporciona, NO limpia la mesa (para splits).
   static Future<void> confirmarPago(
     String docId, {
     required String usuario,
     required int mesaNumero,
     required double totalOrden,
     String? atendidoPor,
+    String? splitGroupId,
+    double? subtotalSplit,
   }) async {
+    if (splitGroupId == null) {
+      await _mesas.doc(docId).update({
+        'solicitudPago': FieldValue.delete(),
+        'status': 'libre',
+        'totalCobrar': FieldValue.delete(),
+        'ocupadaDesde': FieldValue.delete(),
+        'atendidoPor': FieldValue.delete(),
+        'orden': FieldValue.delete(),
+      });
+    }
+    final datos = <String, dynamic>{
+      'mesaNumero': mesaNumero,
+      'total': totalOrden,
+      'tipo': 'pago_confirmado',
+    };
+    if (atendidoPor != null) datos['atendidoPor'] = atendidoPor;
+    if (splitGroupId != null) {
+      datos['splitGroupId'] = splitGroupId;
+      datos['subtotalSplit'] = subtotalSplit ?? totalOrden;
+      datos['esSplit'] = true;
+    }
+    await logEvent(
+      tipo: 'pago_confirmado',
+      descripcion: splitGroupId != null
+          ? 'Mesa $mesaNumero - División \$${totalOrden.toStringAsFixed(0)}'
+          : 'Mesa $mesaNumero pagada y liberada (\$${totalOrden.toStringAsFixed(0)})',
+      usuario: atendidoPor ?? usuario,
+      datos: datos,
+    );
+  }
+
+  /// Limpia la mesa después de procesar todos los splits (sin loguear evento)
+  static Future<void> clearMesa(String docId) async {
     await _mesas.doc(docId).update({
       'solicitudPago': FieldValue.delete(),
       'status': 'libre',
@@ -156,18 +194,6 @@ class FirebaseService {
       'atendidoPor': FieldValue.delete(),
       'orden': FieldValue.delete(),
     });
-    final datos = <String, dynamic>{
-      'mesaNumero': mesaNumero,
-      'total': totalOrden,
-      'tipo': 'pago_confirmado',
-    };
-    if (atendidoPor != null) datos['atendidoPor'] = atendidoPor;
-    await logEvent(
-      tipo: 'pago_confirmado',
-      descripcion: 'Mesa $mesaNumero pagada y liberada (\$${totalOrden.toStringAsFixed(0)})',
-      usuario: atendidoPor ?? usuario,
-      datos: datos,
-    );
   }
 
   /// El admin rechaza la solicitud de pago y la regresa al mesero
@@ -438,6 +464,31 @@ class FirebaseService {
   }
 
   // ─── HISTORIAL ──────────────────────────────────────────────────────────────
+
+  /// Cierra la caja del día (guarda un corte en la colección `cortes`)
+  static Future<void> cerrarCaja(
+    String usuario, {
+    required double totalGeneral,
+    required int numTransacciones,
+  }) async {
+    await _cortes.add({
+      'usuario': usuario,
+      'totalGeneral': totalGeneral,
+      'numTransacciones': numTransacciones,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Stream con el número de cortes realizados hoy
+  static Stream<int> getCortesDeHoyStream() {
+    final inicio = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final fin = inicio.add(const Duration(days: 1));
+    return _cortes
+        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(inicio))
+        .where('timestamp', isLessThan: Timestamp.fromDate(fin))
+        .snapshots()
+        .map((snap) => snap.docs.length);
+  }
 
   /// Registra un evento en el historial
   static Future<void> logEvent({
