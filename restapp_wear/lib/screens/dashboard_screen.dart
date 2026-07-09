@@ -68,10 +68,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       stream: FirestoreService.streamHistorial(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const Center(
-            child: Text(
-              'Error de conexión',
-              style: TextStyle(color: Color(0xFFEF5350), fontSize: 12),
+          return Center(
+            child: SingleChildScrollView(
+              child: Text(
+                'Error: ${snapshot.error}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFFEF5350), fontSize: 8),
+              ),
             ),
           );
         }
@@ -112,10 +115,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       stream: FirestoreService.streamMesas(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const Center(
-            child: Text(
-              'Error de conexión',
-              style: TextStyle(color: Color(0xFFEF5350), fontSize: 12),
+          return Center(
+            child: SingleChildScrollView(
+              child: Text(
+                'Error: ${snapshot.error}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFFEF5350), fontSize: 8),
+              ),
             ),
           );
         }

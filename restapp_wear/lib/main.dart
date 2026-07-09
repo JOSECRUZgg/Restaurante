@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'screens/dashboard_screen.dart';
 
@@ -8,6 +9,15 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Autenticación anónima para cumplir con las reglas de Firestore
+  // sin necesidad de cambiar la base de datos.
+  try {
+    await FirebaseAuth.instance.signInAnonymously();
+  } catch (e) {
+    debugPrint('Error en Auth: $e');
+  }
+
   runApp(const RestApp());
 }
 
