@@ -44,35 +44,35 @@ class _AuthErrorApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
-        backgroundColor: const Color(0xFF0A0E14),
+        backgroundColor: AppColors.bg,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.cloud_off, color: Color(0xFFFF4757), size: 64),
+                const Icon(Icons.cloud_off, color: AppColors.red, size: 64),
                 const SizedBox(height: 16),
                 const Text(
                   'Error de conexión',
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFFF0F6FC),
+                    color: AppColors.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 8),
                 const Text(
                   'No se pudo autenticar con Firebase. Verifica tu conexión a internet y la configuración del proyecto.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: Color(0xFF8B949E)),
+                  style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: () => main(),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2ECC71),
-                    foregroundColor: Colors.black,
+                    backgroundColor: AppColors.green,
+                    foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
@@ -91,21 +91,21 @@ class _AuthErrorApp extends StatelessWidget {
 
 // ─── PALETA DE COLORES ────────────────────────────────────────────────────────
 class AppColors {
-  static const bg = Color(0xFF0D0B0A);
-  static const bgCard = Color(0xFF151210);
-  static const surface = Color(0xFF1D1916);
-  static const surfaceLight = Color(0xFF26211C);
-  static const primary = Color(0xFFE8843C);
-  static const primaryLight = Color(0xFFF5A623);
-  static const primaryDim = Color(0xFFA85D1A);
-  static const textPrimary = Color(0xFFF0EDEB);
-  static const textSecondary = Color(0xFF9E948E);
-  static const textMuted = Color(0xFF544C47);
-  static const orange = Color(0xFFFF8C00);
-  static const red = Color(0xFFFF4757);
-  static const blue = Color(0xFF4C9BE8);
-  static const green = Color(0xFF22C55E);
-  static const borderPrimary = Color(0x26E8843C);
+  static const bg = Color(0xFFF5F7FA);
+  static const bgCard = Color(0xFFFFFFFF);
+  static const surface = Color(0xFFEEF1F6);
+  static const surfaceLight = Color(0xFFE2E7EE);
+  static const primary = Color(0xFF2563EB);
+  static const primaryLight = Color(0xFF60A5FA);
+  static const primaryDim = Color(0xFF93B4F5);
+  static const textPrimary = Color(0xFF1A1D23);
+  static const textSecondary = Color(0xFF5F6B7A);
+  static const textMuted = Color(0xFF9CA3AF);
+  static const orange = Color(0xFFF59E0B);
+  static const red = Color(0xFFEF4444);
+  static const blue = Color(0xFF3B82F6);
+  static const green = Color(0xFF10B981);
+  static const borderPrimary = Color(0x292563EB);
 }
 
 // ─── MODELO PARA ÚLTIMA ACCIÓN (UNDO) ─────────────────────────────────────────
@@ -142,10 +142,10 @@ class ServeSyncApp extends StatelessWidget {
       title: 'Restaurante App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        brightness: Brightness.dark,
+        brightness: Brightness.light,
         scaffoldBackgroundColor: AppColors.bg,
         primaryColor: AppColors.primary,
-        colorScheme: const ColorScheme.dark(
+        colorScheme: const ColorScheme.light(
           primary: AppColors.primary,
           surface: AppColors.surface,
         ),

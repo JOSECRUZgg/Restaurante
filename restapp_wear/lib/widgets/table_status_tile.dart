@@ -14,22 +14,22 @@ class TableStatusTile extends StatelessWidget {
   Color get _estadoColor {
     switch (mesa.estado) {
       case 'libre':
-        return const Color(0xFF2ECC71);
+        return const Color(0xFF10B981);
       case 'ocupada':
-        return const Color(0xFFEF5350);
+        return const Color(0xFFEF4444);
       case 'pago':
-        return const Color(0xFFFFA726);
+        return const Color(0xFFF59E0B);
       case 'reservada':
-        return const Color(0xFF42A5F5);
+        return const Color(0xFF3B82F6);
       default:
-        return const Color(0xFF90A4AE);
+        return const Color(0xFF9CA3AF);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: const Color(0xFF1A1E24),
+      color: const Color(0xFFFFFFFF),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
@@ -70,7 +70,7 @@ class TableStatusTile extends StatelessWidget {
                     Text(
                       'Mesa ${mesa.numero}',
                       style: const TextStyle(
-                        color: Color(0xFFF0F6FC),
+                        color: Color(0xFF1A1D23),
                         fontSize: 9,
                         fontWeight: FontWeight.w600,
                       ),
@@ -78,7 +78,7 @@ class TableStatusTile extends StatelessWidget {
                     Text(
                       mesa.salon,
                       style: const TextStyle(
-                        color: Color(0xFF6B7280),
+                        color: Color(0xFF9CA3AF),
                         fontSize: 8,
                       ),
                     ),

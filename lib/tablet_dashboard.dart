@@ -1536,6 +1536,10 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
   }
 
   Future<void> _processSplitPayments(MesaData mesa, List<_SplitPerson> personas) async {
+    // 1. Mostrar tickets por persona antes de procesar pagos
+    await _simulateSplitPrint(mesa, personas, _paymentMethod);
+
+    // 2. Procesar pagos en Firebase
     final splitGroupId = DateTime.now().millisecondsSinceEpoch.toString();
     double totalGeneral = 0;
 
@@ -1598,6 +1602,55 @@ class _TabletDashboardState extends State<TabletDashboard> with SingleTickerProv
           total: total,
           paymentMethod: _paymentMethod,
           isFinalPayment: isFinalPayment,
+        );
+      },
+    );
+  }
+
+  Future<void> _simulateSplitPrint(MesaData mesa, List<_SplitPerson> personas, String paymentMethod) async {
+    final totalGeneral = mesa.totalOrden;
+    final propinaTotal = _isCustomTip ? _customTipAmount : (totalGeneral * _tipPercentage);
+    final numPersonas = personas.length;
+    final propinaPorPersona = propinaTotal / numPersonas;
+
+    // Build person ticket data
+    final ticketData = <_SplitTicketData>[];
+    for (final p in personas) {
+      double pSubtotal = 0;
+      final items = <Map<String, dynamic>>[];
+      for (final idx in p.itemIndices) {
+        final item = mesa.orden[idx];
+        final cant = item['cantidad'] ?? 1;
+        final precio = (item['precio'] as num?)?.toDouble() ?? 0.0;
+        final sub = precio * cant;
+        pSubtotal += sub;
+        items.add({
+          'nombre': item['nombre'] ?? '',
+          'cantidad': cant,
+          'precio': precio,
+          'subtotal': sub,
+        });
+      }
+      ticketData.add(_SplitTicketData(
+        personName: p.nombre,
+        items: items,
+        subtotal: pSubtotal,
+        propina: propinaPorPersona,
+        iva: pSubtotal * 0.16,
+        total: pSubtotal + propinaPorPersona,
+      ));
+    }
+
+    await showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      transitionDuration: const Duration(milliseconds: 400),
+      pageBuilder: (context, anim1, anim2) {
+        return _SplitTicketsDialog(
+          mesa: mesa,
+          tickets: ticketData,
+          paymentMethod: paymentMethod,
         );
       },
     );
@@ -1937,6 +1990,279 @@ class _SplitPerson {
   String nombre;
   List<int> itemIndices;
   _SplitPerson(this.nombre, {List<int>? indices}) : itemIndices = indices ?? [];
+}
+
+/// Datos de un ticket individual por persona
+class _SplitTicketData {
+  final String personName;
+  final List<Map<String, dynamic>> items;
+  final double subtotal;
+  final double propina;
+  final double iva;
+  final double total;
+
+  _SplitTicketData({
+    required this.personName,
+    required this.items,
+    required this.subtotal,
+    required this.propina,
+    required this.iva,
+    required this.total,
+  });
+}
+
+// ─── SPLIT TICKETS DIALOG - TICKETS POR PERSONA ──────────────────────────────
+class _SplitTicketsDialog extends StatefulWidget {
+  final MesaData mesa;
+  final List<_SplitTicketData> tickets;
+  final String paymentMethod;
+
+  const _SplitTicketsDialog({
+    required this.mesa,
+    required this.tickets,
+    required this.paymentMethod,
+  });
+
+  @override
+  State<_SplitTicketsDialog> createState() => _SplitTicketsDialogState();
+}
+
+class _SplitTicketsDialogState extends State<_SplitTicketsDialog> with SingleTickerProviderStateMixin {
+  late AnimationController _printController;
+  late Animation<double> _slideAnimation;
+  bool _printingCompleted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _printController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    );
+    _slideAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _printController, curve: Curves.easeOutQuad),
+    );
+    _printController.forward().then((_) {
+      setState(() { _printingCompleted = true; });
+    });
+  }
+
+  @override
+  void dispose() {
+    _printController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dateFormat = "${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year} ${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}";
+    final paymentLabel = widget.paymentMethod == 'efectivo'
+        ? 'EFECTIVO'
+        : (widget.paymentMethod == 'tarjeta' ? 'TARJETA DE CRÉDITO/DÉBITO' : 'TRANSFERENCIA BANCARIA');
+
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: 460,
+          height: MediaQuery.of(context).size.height * 0.85,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              // POS Printer top box mockup
+              Container(
+                height: 48,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF2C2D35),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                  boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 4))],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 8, height: 8,
+                      decoration: BoxDecoration(
+                        color: _printingCompleted ? Colors.green : Colors.orange,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _printingCompleted
+                          ? 'IMPRESIÓN COMPLETA — ${widget.tickets.length} TICKETS'
+                          : 'IMPRIMIENDO TICKETS POR PERSONA...',
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+                    ),
+                  ],
+                ),
+              ),
+              Container(height: 6, color: Colors.black),
+              // Receipt paper
+              Expanded(
+                child: AnimatedBuilder(
+                  animation: _slideAnimation,
+                  builder: (context, child) {
+                    return ClipRect(
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        heightFactor: _slideAnimation.value,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: widget.tickets.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final ticket = entry.value;
+                        return _buildPersonTicket(ticket, idx + 1, dateFormat, paymentLabel);
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              if (_printingCompleted)
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('Aceptar', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPersonTicket(_SplitTicketData ticket, int ticketNum, String dateFormat, String paymentLabel) {
+    return Container(
+      width: 380,
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9F9FB),
+        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 4))],
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CustomPaint(size: const Size(380, 10), painter: _JaggedBorderPainter()),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: Column(
+              children: [
+                const Text(
+                  'SERVESYNC RESTAURANT',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 16, fontFamily: 'monospace'),
+                  textAlign: TextAlign.center,
+                ),
+                const Text(
+                  'SUCURSAL CENTRO',
+                  style: TextStyle(color: Colors.black87, fontSize: 12, fontFamily: 'monospace'),
+                  textAlign: TextAlign.center,
+                ),
+                const Divider(color: Colors.black38, height: 20, thickness: 1),
+                _buildRow('TICKET:', '#DIV-${ticketNum.toString().padLeft(3, '0')}'),
+                _buildRow('FECHA:', dateFormat),
+                _buildRow('MESA:', '${widget.mesa.numero} (${widget.mesa.salon})'),
+                _buildRow('MESERO:', widget.mesa.solicitudPago?['solicitadoPor'] ?? widget.mesa.atendidoPor ?? 'Mesero'),
+                _buildRow('CLIENTE:', ticket.personName),
+                const Divider(color: Colors.black38, height: 20, thickness: 1),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: const [
+                    Text('DESC (CANT)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'monospace')),
+                    Text('IMPORTE', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'monospace')),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                ...ticket.items.map((item) {
+                  final cant = item['cantidad'] as int;
+                  final sub = item['subtotal'] as double;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${item['nombre']} (${cant}x)',
+                            style: const TextStyle(color: Colors.black, fontSize: 12, fontFamily: 'monospace'),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          '\$${sub.toStringAsFixed(2)}',
+                          style: const TextStyle(color: Colors.black, fontSize: 12, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                const Divider(color: Colors.black38, height: 24, thickness: 1),
+                _buildRow('SUBTOTAL:', '\$${ticket.subtotal.toStringAsFixed(2)}'),
+                _buildRow('PROPINA:', '\$${ticket.propina.toStringAsFixed(2)}'),
+                _buildRow('I.V.A (16% INC):', '\$${ticket.iva.toStringAsFixed(2)}'),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('TOTAL:', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 15, fontFamily: 'monospace')),
+                    Text('\$${ticket.total.toStringAsFixed(2)}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 15, fontFamily: 'monospace')),
+                  ],
+                ),
+                const Divider(color: Colors.black38, height: 24, thickness: 1),
+                _buildRow('MÉTODO DE PAGO:', paymentLabel),
+                const SizedBox(height: 10),
+                Container(
+                  height: 36, width: 200,
+                  color: Colors.black,
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: List.generate(40, (i) => Container(
+                      width: i % 3 == 0 ? 3 : 1,
+                      color: Colors.white,
+                    )),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'CUENTA DIVIDIDA',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11, fontFamily: 'monospace'),
+                ),
+                const Text(
+                  '*** GRACIAS POR SU VISITA ***',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11, fontFamily: 'monospace'),
+                ),
+              ],
+            ),
+          ),
+          CustomPaint(size: const Size(380, 10), painter: _JaggedBorderPainter(isBottom: true)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.black87, fontSize: 12, fontFamily: 'monospace')),
+          Text(value, style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+        ],
+      ),
+    );
+  }
 }
 
 // Painter for thermal paper jagged tear-off edge

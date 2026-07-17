@@ -28,24 +28,24 @@ class NotificationTile extends StatelessWidget {
   Color get _color {
     switch (evento.tipo) {
       case 'pago_solicitado':
-        return const Color(0xFFFFA726);
+        return const Color(0xFFF59E0B);
       case 'orden_agregada':
-        return const Color(0xFF42A5F5);
+        return const Color(0xFF3B82F6);
       case 'mesa_ocupada':
-        return const Color(0xFFEF5350);
+        return const Color(0xFFEF4444);
       case 'mesa_liberada':
-        return const Color(0xFF66BB6A);
+        return const Color(0xFF10B981);
       case 'pago_aprobado':
-        return const Color(0xFF66BB6A);
+        return const Color(0xFF10B981);
       default:
-        return const Color(0xFF90A4AE);
+        return const Color(0xFF9CA3AF);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: const Color(0xFF1A1E24),
+      color: const Color(0xFFFFFFFF),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: _color.withValues(alpha: 0.3)),
@@ -76,7 +76,7 @@ class NotificationTile extends StatelessWidget {
                     Text(
                       evento.descripcion,
                       style: const TextStyle(
-                        color: Color(0xFFF0F6FC),
+                        color: Color(0xFF1A1D23),
                         fontSize: 9,
                         fontWeight: FontWeight.w500,
                       ),
@@ -87,7 +87,7 @@ class NotificationTile extends StatelessWidget {
                     Text(
                       evento.usuario,
                       style: const TextStyle(
-                        color: Color(0xFF6B7280),
+                        color: Color(0xFF9CA3AF),
                         fontSize: 8,
                       ),
                     ),
@@ -97,7 +97,7 @@ class NotificationTile extends StatelessWidget {
               Text(
                 _formatTime(evento.timestamp),
                 style: const TextStyle(
-                  color: Color(0xFF6B7280),
+                  color: Color(0xFF9CA3AF),
                   fontSize: 8,
                 ),
               ),

@@ -30,12 +30,12 @@ class RestApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'RestApp',
       theme: ThemeData(
-        brightness: Brightness.dark,
+        brightness: Brightness.light,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2ECC71),
-          brightness: Brightness.dark,
+          seedColor: const Color(0xFF2563EB),
+          brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xFF0A0E14),
+        scaffoldBackgroundColor: const Color(0xFFF5F7FA),
         fontFamily: 'Roboto',
       ),
       home: const DashboardScreen(),

@@ -19,10 +19,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0E14),
+      backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0A0E14),
-        foregroundColor: const Color(0xFFF0F6FC),
+        backgroundColor: const Color(0xFFF5F7FA),
+        foregroundColor: const Color(0xFF1A1D23),
         elevation: 0,
         toolbarHeight: 28,
         title: const Text(
@@ -81,7 +81,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (!snapshot.hasData) {
           return const Center(
             child: CircularProgressIndicator(
-              color: Color(0xFF2ECC71),
+              color: Color(0xFF2563EB),
               strokeWidth: 2,
             ),
           );
@@ -91,7 +91,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return const Center(
             child: Text(
               'Sin notificaciones',
-              style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
             ),
           );
         }
@@ -128,7 +128,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (!snapshot.hasData) {
           return const Center(
             child: CircularProgressIndicator(
-              color: Color(0xFF2ECC71),
+              color: Color(0xFF2563EB),
               strokeWidth: 2,
             ),
           );
@@ -147,7 +147,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Text(
                   'SOLICITUDES DE PAGO',
                   style: TextStyle(
-                    color: Color(0xFFFFA726),
+                    color: Color(0xFFF59E0B),
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1,
@@ -169,7 +169,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Text(
                   'OCUPADAS',
                   style: TextStyle(
-                    color: Color(0xFFEF5350),
+                    color: Color(0xFFEF4444),
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1,
@@ -191,7 +191,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Text(
                   'LIBRES',
                   style: TextStyle(
-                    color: Color(0xFF2ECC71),
+                    color: Color(0xFF10B981),
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1,
@@ -212,7 +212,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Center(
                   child: Text(
                     'No hay mesas registradas',
-                    style: TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+                    style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
                   ),
                 ),
               ),
@@ -256,7 +256,7 @@ class _TabButton extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(
-                color: selected ? const Color(0xFF2ECC71) : Colors.transparent,
+                color: selected ? const Color(0xFF2563EB) : Colors.transparent,
                 width: 1.5,
               ),
             ),
@@ -268,16 +268,16 @@ class _TabButton extends StatelessWidget {
                 icon,
                 size: 10,
                 color: selected
-                    ? const Color(0xFF2ECC71)
-                    : const Color(0xFF6B7280),
+                    ? const Color(0xFF2563EB)
+                    : const Color(0xFF9CA3AF),
               ),
               const SizedBox(width: 3),
               Text(
                 label,
                 style: TextStyle(
                   color: selected
-                      ? const Color(0xFFF0F6FC)
-                      : const Color(0xFF6B7280),
+                      ? const Color(0xFF1A1D23)
+                      : const Color(0xFF9CA3AF),
                   fontSize: 9,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 ),

@@ -11,25 +11,25 @@ class TableDetailScreen extends StatelessWidget {
   Color get _estadoColor {
     switch (mesa.estado) {
       case 'libre':
-        return const Color(0xFF2ECC71);
+        return const Color(0xFF10B981);
       case 'ocupada':
-        return const Color(0xFFEF5350);
+        return const Color(0xFFEF4444);
       case 'pago':
-        return const Color(0xFFFFA726);
+        return const Color(0xFFF59E0B);
       case 'reservada':
-        return const Color(0xFF42A5F5);
+        return const Color(0xFF3B82F6);
       default:
-        return const Color(0xFF90A4AE);
+        return const Color(0xFF9CA3AF);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0E14),
+      backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0A0E14),
-        foregroundColor: const Color(0xFFF0F6FC),
+        backgroundColor: const Color(0xFFF5F7FA),
+        foregroundColor: const Color(0xFF1A1D23),
         title: Text('Mesa ${mesa.numero}', style: const TextStyle(fontSize: 12)),
         centerTitle: true,
         elevation: 0,
@@ -78,7 +78,7 @@ class TableDetailScreen extends StatelessWidget {
               Text(
                 mesa.salon,
                 style: const TextStyle(
-                  color: Color(0xFF6B7280),
+                  color: Color(0xFF9CA3AF),
                   fontSize: 9,
                 ),
               ),
@@ -86,7 +86,7 @@ class TableDetailScreen extends StatelessWidget {
               Text(
                 'Capacidad: ${mesa.capacidad} pers.',
                 style: const TextStyle(
-                  color: Color(0xFF6B7280),
+                  color: Color(0xFF9CA3AF),
                   fontSize: 8,
                 ),
               ),
@@ -95,7 +95,7 @@ class TableDetailScreen extends StatelessWidget {
                 Text(
                   '\$${mesa.total.toStringAsFixed(2)}',
                   style: const TextStyle(
-                    color: Color(0xFFF0F6FC),
+                    color: Color(0xFF1A1D23),
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
                   ),
@@ -110,7 +110,7 @@ class TableDetailScreen extends StatelessWidget {
                     icon: const Icon(Icons.check_circle, size: 12),
                     label: const Text('Aprobar Pago', style: TextStyle(fontSize: 10)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2ECC71),
+                      backgroundColor: const Color(0xFF10B981),
                       foregroundColor: Colors.black,
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       shape: RoundedRectangleBorder(
@@ -130,8 +130,8 @@ class TableDetailScreen extends StatelessWidget {
                     icon: const Icon(Icons.close, size: 12),
                     label: const Text('Liberar Mesa', style: TextStyle(fontSize: 10)),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFEF5350),
-                      side: const BorderSide(color: Color(0xFFEF5350)),
+                      foregroundColor: const Color(0xFFEF4444),
+                      side: const BorderSide(color: Color(0xFFEF4444)),
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(6),
@@ -149,7 +149,7 @@ class TableDetailScreen extends StatelessWidget {
                     icon: const Icon(Icons.table_restaurant, size: 12),
                     label: const Text('Marcar Ocupada', style: TextStyle(fontSize: 10)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFEF5350),
+                      backgroundColor: const Color(0xFFEF4444),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       shape: RoundedRectangleBorder(
@@ -173,16 +173,16 @@ class TableDetailScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1E24),
+        backgroundColor: const Color(0xFFFFFFFF),
         content: const Text(
           '¿Aprobar pago y liberar la mesa?',
-          style: TextStyle(color: Color(0xFFF0F6FC)),
+          style: TextStyle(color: Color(0xFF1A1D23)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancelar',
-                style: TextStyle(color: Color(0xFF6B7280))),
+                style: TextStyle(color: Color(0xFF9CA3AF))),
           ),
           TextButton(
             onPressed: () {
@@ -192,7 +192,7 @@ class TableDetailScreen extends StatelessWidget {
               Navigator.pop(context);
             },
             child: const Text('Aprobar',
-                style: TextStyle(color: Color(0xFF2ECC71))),
+                style: TextStyle(color: Color(0xFF10B981))),
           ),
         ],
       ),
@@ -204,16 +204,16 @@ class TableDetailScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1E24),
+        backgroundColor: const Color(0xFFFFFFFF),
         content: const Text(
           '¿Liberar la mesa? Se perderá la orden actual.',
-          style: TextStyle(color: Color(0xFFF0F6FC)),
+          style: TextStyle(color: Color(0xFF1A1D23)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancelar',
-                style: TextStyle(color: Color(0xFF6B7280))),
+                style: TextStyle(color: Color(0xFF9CA3AF))),
           ),
           TextButton(
             onPressed: () {
@@ -223,7 +223,7 @@ class TableDetailScreen extends StatelessWidget {
               Navigator.pop(context);
             },
             child: const Text('Liberar',
-                style: TextStyle(color: Color(0xFFEF5350))),
+                style: TextStyle(color: Color(0xFFEF4444))),
           ),
         ],
       ),
