@@ -1,17 +1,24 @@
-# waiter_app
+# Restaurante App - Monorepo
 
-A new Flutter project.
+Este proyecto contiene las aplicaciones del sistema de gestión para restaurantes.
 
-## Getting Started
+## Estructura del Proyecto
 
-This project is a starting point for a Flutter application.
+*   📁 **[restapp_mobile](./restapp_mobile)**: Aplicación principal para Tablets y Móviles. Es la herramienta principal para los meseros y la caja.
+*   📁 **[app_nueva_smartwatch](./app_nueva_smartwatch)**: Aplicación compañero para Smartwatches (Wear OS). Permite recibir notificaciones y alertas rápidas en la muñeca.
 
-A few resources to get you started if this is your first Flutter project:
+## Instrucciones
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Para trabajar en cualquiera de las aplicaciones, entra en su respectiva carpeta y ejecuta los comandos de Flutter estándar:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+cd restapp_mobile
+flutter pub get
+flutter run
+```
+
+```bash
+cd app_nueva_smartwatch
+flutter pub get
+flutter run
+```
