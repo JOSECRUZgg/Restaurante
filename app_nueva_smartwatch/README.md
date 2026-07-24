@@ -1,4 +1,6 @@
-# restapp_wear
+# restapp_wear - Smartwatch App
+
+Esta es la aplicación complementaria para el smartwatch (Wear OS).
 
 A new Flutter project.
 
